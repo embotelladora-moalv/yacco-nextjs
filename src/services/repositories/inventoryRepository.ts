@@ -1,45 +1,255 @@
-// src/services/repositories/inventoryRepository.ts
 import { adminDb } from "../firebase/admin";
-import { productRepository } from "./productRepository";
+import admin from "firebase-admin";
+import {
+  Product,
+  ProductionBatch,
+  ShrinkageLog,
+  KardexLog,
+} from "@/core/entities/Inventory";
 
-export type KardexItem = {
-  id: string;
-  productId: string;
-  productName: string;
-  packagingType: string;
-  volumeCapacity: number;
-  quantityFull: number;
-  warehouseLocation: string;
-  lastUpdatedAt: Date;
-};
+const PRODUCTS_COLLECTION = "products";
+const KARDEX_COLLECTION = "kardexLogs";
+const PRODUCTION_COLLECTION = "productionBatches";
+const SHRINKAGE_COLLECTION = "shrinkageLogs";
 
 export const inventoryRepository = {
-  async getKardex(): Promise<KardexItem[]> {
-    // 1. Traemos todo el inventario
-    const inventorySnapshot = await adminDb.collection("inventory_items").get();
+  // ----------------------------------------------------------------
+  // 1. GESTIÓN DE CATÁLOGO DE PRODUCTOS
+  // ----------------------------------------------------------------
+  async getAllProducts(): Promise<Product[]> {
+    const snapshot = await adminDb
+      .collection(PRODUCTS_COLLECTION)
+      .orderBy("name", "asc")
+      .get();
+    return snapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.id,
+          ...doc.data(),
+          createdAt: doc.data().createdAt?.toDate(),
+          updatedAt: doc.data().updatedAt?.toDate(),
+        }) as Product,
+    );
+  },
 
-    // 2. Traemos los productos para obtener sus nombres
-    const products = await productRepository.getActiveProducts();
+  async createProduct(data: Partial<Product>): Promise<string> {
+    const ref = adminDb.collection(PRODUCTS_COLLECTION).doc();
+    await ref.set({
+      ...data,
+      stockEmpty: data.stockEmpty || 0,
+      stockFilled: data.stockFilled || 0,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return ref.id;
+  },
 
-    // Creamos un diccionario para buscar productos rápido por su ID
-    const productMap = new Map(products.map((p) => [p.id, p]));
+  // ----------------------------------------------------------------
+  // 2. INGRESO DE COMPRAS (Suma de Vacíos)
+  // ----------------------------------------------------------------
+  async registerPurchase(
+    productId: string,
+    quantity: number,
+    managerId: string,
+  ): Promise<void> {
+    await adminDb.runTransaction(async (transaction) => {
+      const productRef = adminDb.collection(PRODUCTS_COLLECTION).doc(productId);
+      const productDoc = await transaction.get(productRef);
 
-    // 3. Unimos los datos
-    return inventorySnapshot.docs.map((doc) => {
-      const data = doc.data();
-      const product = productMap.get(data.productId);
+      if (!productDoc.exists) throw new Error("Producto no encontrado");
+      const currentStockEmpty = productDoc.data()?.stockEmpty || 0;
 
-      return {
-        id: doc.id,
-        productId: data.productId,
-        quantityFull: data.quantityFull || 0,
-        warehouseLocation: data.warehouseLocation || "No asignada",
-        lastUpdatedAt: data.lastUpdatedAt?.toDate() || new Date(),
-        // Datos cruzados del producto
-        productName: product?.name || "Producto Desconocido",
-        packagingType: product?.packagingType || "N/A",
-        volumeCapacity: product?.volumeCapacity || 0,
+      // 1. Actualizar Stock del Producto
+      transaction.update(productRef, {
+        stockEmpty: currentStockEmpty + quantity,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 2. Registrar en el Kardex (Auditoría)
+      const kardexRef = adminDb.collection(KARDEX_COLLECTION).doc();
+      const kardexEntry: Omit<KardexLog, "id"> = {
+        productId,
+        type: "IN",
+        phase: "EMPTY",
+        quantity,
+        referenceId: "COMPRA_DIRECTA", // Aquí luego podríamos vincular una Factura de Proveedor
+        referenceType: "PURCHASE",
+        previousStock: currentStockEmpty,
+        newStock: currentStockEmpty + quantity,
+        createdAt: new Date(),
       };
+      transaction.set(kardexRef, kardexEntry);
+    });
+  },
+
+  // ----------------------------------------------------------------
+  // 3. REGISTRO DE PRODUCCIÓN (Convierte Vacíos en Llenos)
+  // ----------------------------------------------------------------
+  async registerProduction(
+    batch: Omit<ProductionBatch, "id" | "createdAt">,
+  ): Promise<void> {
+    await adminDb.runTransaction(async (transaction) => {
+      const productRef = adminDb
+        .collection(PRODUCTS_COLLECTION)
+        .doc(batch.productId);
+      const productDoc = await transaction.get(productRef);
+
+      if (!productDoc.exists) throw new Error("Producto no encontrado");
+
+      const productData = productDoc.data() as Product;
+      const currentEmpty = productData.stockEmpty;
+      const currentFilled = productData.stockFilled;
+
+      // Validar si es un envase retornable (Requiere vacíos para producir)
+      if (
+        productData.isReturnableContainer &&
+        currentEmpty < batch.quantityProduced
+      ) {
+        throw new Error(
+          `Stock insuficiente de envases vacíos. Disponibles: ${currentEmpty}`,
+        );
+      }
+
+      // 1. Guardar el Lote de Producción
+      const batchRef = adminDb.collection(PRODUCTION_COLLECTION).doc();
+      transaction.set(batchRef, {
+        ...batch,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 2. Actualizar Stocks
+      const newEmpty = productData.isReturnableContainer
+        ? currentEmpty - batch.quantityProduced
+        : currentEmpty;
+      const newFilled = currentFilled + batch.quantityProduced;
+
+      transaction.update(productRef, {
+        stockEmpty: newEmpty,
+        stockFilled: newFilled,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 3. Registrar Kardex (Salida de Vacíos)
+      if (productData.isReturnableContainer) {
+        const kardexOutRef = adminDb.collection(KARDEX_COLLECTION).doc();
+        transaction.set(kardexOutRef, {
+          productId: batch.productId,
+          type: "OUT",
+          phase: "EMPTY",
+          quantity: batch.quantityProduced,
+          referenceId: batchRef.id,
+          referenceType: "PRODUCTION",
+          previousStock: currentEmpty,
+          newStock: newEmpty,
+          createdAt: new Date(),
+        });
+      }
+
+      // 4. Registrar Kardex (Ingreso de Llenos)
+      const kardexInRef = adminDb.collection(KARDEX_COLLECTION).doc();
+      transaction.set(kardexInRef, {
+        productId: batch.productId,
+        type: "IN",
+        phase: "FILLED",
+        quantity: batch.quantityProduced,
+        referenceId: batchRef.id,
+        referenceType: "PRODUCTION",
+        previousStock: currentFilled,
+        newStock: newFilled,
+        createdAt: new Date(),
+      });
+    });
+  },
+
+  // ----------------------------------------------------------------
+  // 4. REGISTRO DE MERMA (Descuentos manuales por roturas)
+  // ----------------------------------------------------------------
+  async registerShrinkage(
+    shrinkage: Omit<ShrinkageLog, "id" | "createdAt">,
+  ): Promise<void> {
+    await adminDb.runTransaction(async (transaction) => {
+      const productRef = adminDb
+        .collection(PRODUCTS_COLLECTION)
+        .doc(shrinkage.productId);
+      const productDoc = await transaction.get(productRef);
+
+      if (!productDoc.exists) throw new Error("Producto no encontrado");
+      const data = productDoc.data() as Product;
+
+      const currentStock =
+        shrinkage.phase === "EMPTY" ? data.stockEmpty : data.stockFilled;
+      if (currentStock < shrinkage.quantity) {
+        throw new Error(
+          `Stock insuficiente para declarar merma. Disponible: ${currentStock}`,
+        );
+      }
+
+      // 1. Guardar la Merma
+      const shrinkageRef = adminDb.collection(SHRINKAGE_COLLECTION).doc();
+      transaction.set(shrinkageRef, {
+        ...shrinkage,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 2. Actualizar Stock
+      const newStock = currentStock - shrinkage.quantity;
+      transaction.update(productRef, {
+        [shrinkage.phase === "EMPTY" ? "stockEmpty" : "stockFilled"]: newStock,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 3. Registrar en el Kardex
+      const kardexRef = adminDb.collection(KARDEX_COLLECTION).doc();
+      transaction.set(kardexRef, {
+        productId: shrinkage.productId,
+        type: "OUT",
+        phase: shrinkage.phase,
+        quantity: shrinkage.quantity,
+        referenceId: shrinkageRef.id,
+        referenceType: "SHRINKAGE",
+        previousStock: currentStock,
+        newStock: newStock,
+        createdAt: new Date(),
+      });
+    });
+  },
+
+  // ----------------------------------------------------------------
+  // 5. CONSULTA DE KARDEX (Auditoría)
+  // ----------------------------------------------------------------
+  async getKardexByProduct(productId: string): Promise<KardexLog[]> {
+    const snapshot = await adminDb
+      .collection(KARDEX_COLLECTION)
+      .where("productId", "==", productId)
+      .orderBy("createdAt", "desc")
+      .limit(100) // Traemos los últimos 100 movimientos por rendimiento
+      .get();
+
+    return snapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.id,
+          ...doc.data(),
+          // Serializamos la fecha para que Next.js no se queje en el Client Component
+          createdAt: doc.data().createdAt?.toDate()?.toISOString(),
+        }) as any,
+    ); // Usamos any aquí temporalmente por la serialización de la fecha
+  },
+
+  async updateProduct(id: string, data: Partial<Product>): Promise<void> {
+    await adminDb
+      .collection(PRODUCTS_COLLECTION)
+      .doc(id)
+      .update({
+        ...data,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+  },
+
+  async toggleProductStatus(id: string, isActive: boolean): Promise<void> {
+    await adminDb.collection(PRODUCTS_COLLECTION).doc(id).update({
+      isActive,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   },
 };

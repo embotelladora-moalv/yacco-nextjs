@@ -1,16 +1,8 @@
 // src/services/firebase/config.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
-import {
-  connectFirestoreEmulator,
-  Firestore,
-  getFirestore,
-} from "firebase/firestore";
-import { Auth, connectAuthEmulator, getAuth } from "firebase/auth";
-import {
-  getStorage,
-  FirebaseStorage,
-  connectStorageEmulator,
-} from "firebase/storage";
+import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import { connectAuthEmulator, getAuth } from "firebase/auth";
+import { getStorage, connectStorageEmulator } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -21,22 +13,26 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Singleton pattern to avoid re-initializing Firebase in Next.js hot reloads
 const firebaseApp = !getApps().length
   ? initializeApp(firebaseConfig)
   : getApp();
 
-const auth: Auth = getAuth(firebaseApp);
-const db: Firestore = getFirestore(firebaseApp);
-const storage: FirebaseStorage = getStorage(firebaseApp);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+const storage = getStorage(firebaseApp);
 
-// // --- CONFIGURACIÓN DE EMULADORES (SOLO DESARROLLO) ---
-// // Usamos '127.0.0.1' para evitar problemas de resolución de 'localhost' en algunos sistemas
-// if (process.env.NODE_ENV === "development") {
-//   connectFirestoreEmulator(db, "127.0.0.1", 8080);
-//   connectAuthEmulator(auth, "http://127.0.0.1:9099");
-//   connectStorageEmulator(storage, "127.0.0.1", 9199);
-//   console.log("🚀 Conectado a Firebase Local Emulators");
-// }
+// --- CONFIGURACIÓN PARA EL EMULADOR ---
+if (process.env.NODE_ENV === "development") {
+  // Conectar Firestore al puerto 8080
+  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+
+  // Conectar Auth al puerto 9099
+  connectAuthEmulator(auth, "http://127.0.0.1:9099");
+
+  // Conectar Storage al puerto 9199
+  connectStorageEmulator(storage, "127.0.0.1", 9199);
+
+  console.log("🚀 Cliente conectado a Firebase Local Emulators");
+}
 
 export { firebaseApp, db, auth, storage };

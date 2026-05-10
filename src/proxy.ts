@@ -17,7 +17,7 @@ export async function proxy(request: NextRequest) {
   // 1. Regla para la página de acceso
   if (pathname === "/login") {
     if (sessionValue) {
-      return NextResponse.redirect(new URL("/inventory", request.url));
+      return NextResponse.redirect(new URL("/dashboard", request.url));
     }
     return NextResponse.next();
   }

@@ -1,22 +1,44 @@
-import { MapWrapper } from "./MapWrapper";
 import { customerRepository } from "@/services/repositories/customerRepository";
+import { MapPin } from "lucide-react";
+import { CustomerMap } from "./CustomerMap";
 
-export default async function MapPage() {
-  // Seguimos obteniendo los datos en el servidor para mayor eficiencia
-  const customers = await customerRepository.getAllActive();
+export default async function CustomerMapPage() {
+  const customers = await customerRepository.getAll();
+
+  // Extraemos solo las ubicaciones que tengan coordenadas registradas
+  const mapPins = customers.flatMap((customer) =>
+    customer.locations
+      .filter((loc) => loc.latitude && loc.longitude)
+      .map((loc) => ({
+        customerId: customer.id,
+        customerName: customer.name,
+        customerType: customer.type,
+        debtAmount: customer.debtAmount,
+        locationId: loc.id,
+        locationName: loc.name,
+        address: loc.address,
+        latitude: loc.latitude!,
+        longitude: loc.longitude!,
+        isDefault: loc.isDefault,
+      })),
+  );
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-black tracking-tight text-gray-900">
-          Mapa Logístico
-        </h1>
-        <p className="text-sm text-gray-500 font-medium">
-          Visualización de red de distribución.
-        </p>
+    <div className="h-[calc(100vh-6rem)] flex flex-col space-y-4 max-w-7xl mx-auto pb-6">
+      <div className="flex justify-between items-center shrink-0">
+        <div>
+          <h1 className="text-3xl font-black text-slate-900 flex items-center gap-3">
+            <MapPin className="h-8 w-8 text-blue-600" />
+            Mapa de Clientes
+          </h1>
+          <p className="text-sm text-slate-500 font-medium mt-1">
+            Geolocalización de cartera para planificación de rutas Moalv S.a.C.
+          </p>
+        </div>
       </div>
 
-      <MapWrapper customers={customers} />
+      {/* Pasamos los pines calculados a la vista del cliente */}
+      <CustomerMap pins={mapPins} />
     </div>
   );
 }

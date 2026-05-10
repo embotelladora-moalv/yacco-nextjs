@@ -66,6 +66,45 @@ export const productRepository = {
       } as Product;
     });
   },
+
+  /**
+   * Obtiene un producto por su ID para el formulario de Edición.
+   */
+  async getById(id: string): Promise<Product | null> {
+    const doc = await adminDb.collection(COLLECTION_NAME).doc(id).get();
+    if (!doc.exists) return null;
+
+    const data = doc.data()!;
+    return {
+      id: doc.id,
+      ...data,
+      createdAt: data.createdAt?.toDate(),
+      updatedAt: data.updatedAt?.toDate(),
+    } as Product;
+  },
+
+  /**
+   * Actualiza los datos de un SKU existente.
+   */
+  async update(id: string, data: Partial<ProductFormValues>): Promise<void> {
+    await adminDb
+      .collection(COLLECTION_NAME)
+      .doc(id)
+      .update({
+        ...data,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+  },
+
+  /**
+   * Borrado Lógico: Oculta el producto sin afectar facturas ni Kardex antiguo.
+   */
+  async deactivate(id: string): Promise<void> {
+    await adminDb.collection(COLLECTION_NAME).doc(id).update({
+      isActive: false,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  },
 };
 
 export async function getActiveProductsAction() {

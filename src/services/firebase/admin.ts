@@ -1,17 +1,19 @@
 // src/services/firebase/admin.ts
 import admin from "firebase-admin";
-
-// Importamos el archivo JSON directamente.
-// (TypeScript/Next.js se encargan de leer los saltos de línea \n a la perfección)
 import serviceAccount from "../../../serviceAccount.json";
 
 if (!admin.apps.length) {
   try {
+    // Si estamos en desarrollo, el SDK usará las variables de entorno para emuladores
     admin.initializeApp({
-      // @ts-ignore - Evitamos errores de tipado estrictos con el JSON
-      credential: admin.credential.cert(serviceAccount),
+      credential: admin.credential.cert(serviceAccount as any),
     });
-    console.log("🔥 Firebase Admin inicializado (Vía archivo JSON)");
+
+    if (process.env.FIRESTORE_EMULATOR_HOST) {
+      console.log("🔥 Firebase Admin operando sobre Firestore Emulator");
+    } else {
+      console.log("🔥 Firebase Admin inicializado (Producción/Cloud)");
+    }
   } catch (error) {
     console.error("❌ Error inicializando Firebase Admin:", error);
   }

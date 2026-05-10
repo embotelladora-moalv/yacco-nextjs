@@ -1,4 +1,3 @@
-// src/components/shared/Sidebar.tsx
 "use client";
 
 import Link from "next/link";
@@ -15,8 +14,11 @@ import {
   Truck,
   FileText,
   MapPin,
+  Map,
+  Navigation,
+  ShoppingCart,
+  HandCoins,
 } from "lucide-react";
-// Importamos la acción de servidor para el cierre de sesión
 import { logoutAction } from "@/app/login/actions";
 
 interface SidebarProps {
@@ -27,7 +29,6 @@ interface SidebarProps {
   } | null;
 }
 
-// Estructura de navegación corporativa de Yacco
 const navigationGroups = [
   {
     title: "Principal",
@@ -45,13 +46,18 @@ const navigationGroups = [
     title: "Ventas y Clientes",
     items: [
       { name: "Directorio Clientes", href: "/customers", icon: Users },
-      { name: "Mapa de Clientes", href: "/customers/map", icon: MapPin }, // Requisito: Mapa de ubicaciones
+      { name: "Pedidos y Ventas", href: "/orders", icon: ShoppingCart },
+      { name: "Cobranzas", href: "/collections", icon: HandCoins }, // Módulo de amortización
       { name: "Facturación", href: "/billing", icon: FileText },
     ],
   },
   {
     title: "Logística y Flota",
-    items: [{ name: "Vehículos", href: "/fleet", icon: Truck }],
+    items: [
+      { name: "Monitoreo de Rutas", href: "/routes", icon: Map },
+      { name: "Despacho Rápido", href: "/dispatch", icon: Navigation }, // Centro de asignación
+      { name: "Vehículos", href: "/trucks", icon: Truck },
+    ],
   },
   {
     title: "Administración",
@@ -64,27 +70,28 @@ const navigationGroups = [
 
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
+  const userRole = user?.role || "ADMIN";
 
-  // Extraemos el rol (Default: PLANTA) para el filtrado visual
-  const userRole = user?.role || "PLANTA";
-
-  // Filtrado de menús por jerarquía de Embotelladora Moalv S.a.C.
   const visibleGroups = navigationGroups.filter((group) => {
     if (group.title === "Administración" && userRole !== "ADMIN") return false;
     if (
       group.title === "Logística y Flota" &&
-      !["ADMIN", "LOGISTICA"].includes(userRole)
+      !["ADMIN", "PRODUCTION", "SALES"].includes(userRole)
     )
       return false;
     if (
-      group.title === "Ventas y Facturación" &&
-      !["ADMIN", "VENTAS"].includes(userRole)
+      group.title === "Ventas y Clientes" &&
+      !["ADMIN", "SALES"].includes(userRole)
+    )
+      return false;
+    if (
+      group.title === "Planta y Producción" &&
+      !["ADMIN", "PRODUCTION"].includes(userRole)
     )
       return false;
     return true;
   });
 
-  // Iniciales para el avatar corporativo
   const initials = user?.name
     ? user.name
         .split(" ")
@@ -96,7 +103,6 @@ export function Sidebar({ user }: SidebarProps) {
 
   return (
     <div className="flex h-full w-full flex-col bg-white border-r">
-      {/* --- IDENTIDAD CORPORATIVA YACCO --- */}
       <div className="flex h-16 items-center gap-3 border-b px-6 shrink-0 bg-white">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-700 text-white shadow-lg">
           <Droplet className="h-6 w-6" />
@@ -111,7 +117,6 @@ export function Sidebar({ user }: SidebarProps) {
         </div>
       </div>
 
-      {/* --- MENÚ DE NAVEGACIÓN --- */}
       <nav className="flex-1 space-y-7 px-4 py-8 overflow-y-auto overflow-x-hidden">
         {visibleGroups.map((group) => (
           <div key={group.title}>
@@ -120,7 +125,9 @@ export function Sidebar({ user }: SidebarProps) {
             </h3>
             <div className="space-y-1">
               {group.items.map((item) => {
-                const isActive = pathname.startsWith(item.href);
+                const isActive =
+                  pathname === item.href ||
+                  pathname.startsWith(`${item.href}/`);
                 const Icon = item.icon;
 
                 return (
@@ -145,7 +152,6 @@ export function Sidebar({ user }: SidebarProps) {
         ))}
       </nav>
 
-      {/* --- PERFIL Y CIERRE DE SESIÓN --- */}
       <div className="border-t p-4 bg-gray-50/40">
         <div className="flex items-center gap-3 mb-5 px-2">
           <div className="h-10 w-10 rounded-full bg-blue-700 text-white flex items-center justify-center font-bold text-sm shadow-md border-2 border-white ring-1 ring-blue-100">
@@ -155,25 +161,18 @@ export function Sidebar({ user }: SidebarProps) {
             <span className="text-sm font-bold text-gray-900 truncate">
               {user?.name || "Operador Yacco"}
             </span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[9px] font-extrabold text-blue-700 bg-blue-50 px-1.5 rounded uppercase">
-                {userRole}
-              </span>
-              <span className="text-[10px] font-medium text-gray-400 truncate">
-                RUC 20612769151
-              </span>
-            </div>
+            <span className="text-[9px] font-extrabold text-blue-700 bg-blue-50 px-1.5 rounded uppercase w-fit">
+              {userRole}
+            </span>
           </div>
         </div>
 
-        {/* Cierre de sesión usando Server Action nativa */}
         <form action={logoutAction}>
           <button
             type="submit"
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50 hover:border-red-200 transition-all shadow-sm active:scale-95"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50 hover:border-red-200 transition-all"
           >
-            <LogOut className="h-4 w-4" />
-            Finalizar Jornada
+            <LogOut className="h-4 w-4" /> Finalizar Jornada
           </button>
         </form>
       </div>
