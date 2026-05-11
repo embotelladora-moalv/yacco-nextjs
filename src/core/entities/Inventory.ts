@@ -4,28 +4,26 @@
 // ---------------------------------------------------------
 export interface Product {
   id: string;
-  name: string; // Ej: "Bidón 20L con Caño"
-  sku: string; // Ej: "BID-20L-C"
-
+  name: string;
+  sku: string;
   operationalCategory: "FULL_PRODUCT" | "EMPTY_CONTAINER" | "ACCESSORY";
-
-  // Clasificación (Dynamic type from settings as discussed)
   packagingType: string;
+
+  // NUEVOS CAMPOS DE MAQUILA
+  isMaquila: boolean;
+  brandName?: string; // Nombre de la marca externa (Ej: "Agua María")
+
   volumeCapacity: number;
   unitOfMeasure: "L" | "ml" | "Gal" | "Oz";
   hasTap: boolean;
-  isReturnableContainer: boolean; // CRÍTICO: Activa la lógica de envases
+  isReturnableContainer: boolean;
 
-  // --- FINANZAS Y PRECIOS ---
-  // Si es descartable (Ej: Botella de 1L), solo usa priceFull.
-  // Si es retornable (Ej: Bidón 20L), usa los 3.
-  priceRefill: number; // Precio solo del líquido (exige que el cliente dé un envase vacío)
-  priceFull: number; // Precio líquido + envase (no exige envase a cambio)
-  priceEmpty: number; // Precio del envase vacío (para penalidad por pérdida o venta directa)
+  priceRefill: number;
+  priceFull: number;
+  priceEmpty: number;
 
-  // --- KARDEX BIFÁSICO ---
-  stockFilled: number; // Bidones listos para vender
-  stockEmpty: number; // Bidones vacíos listos para lavar/producción
+  stockFilled: number;
+  stockEmpty: number;
 
   isActive: boolean;
   createdAt: Date;
@@ -37,18 +35,17 @@ export interface Product {
 // ---------------------------------------------------------
 export interface ProductionBatch {
   id: string;
-  lotNumber: string; // Ej: L-09052026-01
+  lotNumber: string; // Será formato L-YYYYMMDD (Ej: L-20260510)
   productId: string;
-  quantityProduced: number; // Aumentará el stockFilled y restará el stockEmpty
+  quantityProduced: number; // El total histórico producido ese día
+  currentStock: number; // <-- NUEVO: Cuántos quedan de este lote en almacén
   productionDate: Date;
-  managerId: string; // ID del encargado responsable (Auditoría)
-
-  // Maquila
+  managerId: string;
   isTollManufacturing: boolean;
-  brandId?: string; // Nombre o ID de la marca maquilada
-
+  brandName?: string; // Nombre de la marca externa (Ej: "Agua María")
   notes?: string;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ShrinkageLog {

@@ -86,7 +86,10 @@ export const inventoryRepository = {
   // 3. REGISTRO DE PRODUCCIÓN (Convierte Vacíos en Llenos)
   // ----------------------------------------------------------------
   async registerProduction(
-    batch: Omit<ProductionBatch, "id" | "createdAt">,
+    batch: Omit<
+      ProductionBatch,
+      "id" | "createdAt" | "lotNumber" | "currentStock" | "updatedAt"
+    >,
   ): Promise<void> {
     await adminDb.runTransaction(async (transaction) => {
       const productRef = adminDb
@@ -110,12 +113,48 @@ export const inventoryRepository = {
         );
       }
 
-      // 1. Guardar el Lote de Producción
-      const batchRef = adminDb.collection(PRODUCTION_COLLECTION).doc();
-      transaction.set(batchRef, {
-        ...batch,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      // 1. GENERAR EL NÚMERO DE LOTE BASADO EN LA FECHA (YYYYMMDD)
+      // Extraemos la fecha del objeto Date (Ej: "2026-05-10") y quitamos los guiones
+      const dateIso = batch.productionDate.toISOString().split("T")[0];
+      const dateStr = dateIso.replace(/-/g, "");
+      const lotNumber = `L-${dateStr}`;
+
+      // 2. BUSCAR SI YA EXISTE PRODUCCIÓN HOY PARA ESTE PRODUCTO
+      const batchQuery = await transaction.get(
+        adminDb
+          .collection(PRODUCTION_COLLECTION)
+          .where("productId", "==", batch.productId)
+          .where("lotNumber", "==", lotNumber)
+          .limit(1),
+      );
+
+      let batchRef;
+
+      if (!batchQuery.empty) {
+        // MODO ACUMULACIÓN: Ya se produjo algo hoy, solo sumamos
+        batchRef = batchQuery.docs[0].ref;
+        const existingData = batchQuery.docs[0].data();
+
+        transaction.update(batchRef, {
+          quantityProduced:
+            existingData.quantityProduced + batch.quantityProduced,
+          currentStock:
+            (existingData.currentStock || 0) + batch.quantityProduced,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } else {
+        // MODO NUEVO LOTE: Es la primera producción del día para este SKU
+        batchRef = adminDb.collection(PRODUCTION_COLLECTION).doc();
+        transaction.set(batchRef, {
+          ...batch,
+          lotNumber: lotNumber,
+          currentStock: batch.quantityProduced, // El stock inicial es lo que acabamos de producir
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      // ... (El código posterior donde actualizas los stocks del producto y el Kardex sigue igual)
 
       // 2. Actualizar Stocks
       const newEmpty = productData.isReturnableContainer

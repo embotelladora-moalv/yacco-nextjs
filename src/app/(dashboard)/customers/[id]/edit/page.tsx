@@ -1,9 +1,9 @@
 import { customerRepository } from "@/services/repositories/customerRepository";
-import { CustomerForm } from "../../new/CustomerForm";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 import { notFound } from "next/navigation";
+import { CustomerForm } from "../../CustomerForm";
 
 export default async function EditCustomerPage({
   params,
@@ -11,7 +11,7 @@ export default async function EditCustomerPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const customer = await customerRepository.getById(id);
+  const customer = await customerRepository.getCustomerById(id);
   if (!customer) notFound();
 
   return (

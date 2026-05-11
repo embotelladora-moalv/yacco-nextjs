@@ -1,34 +1,25 @@
-export type OrderStatus = "RESERVED" | "ASSIGNED" | "DELIVERED" | "CANCELLED";
-export type OrderType = "PRE_ORDER" | "ROUTE_SALE" | "PLANT_SALE";
-export type PaymentMethod = "CASH" | "YAPE" | "PLIN" | "TRANSFER" | "CREDIT";
-export type PaymentStatus = "PENDING" | "PARTIAL" | "PAID";
-
 export interface OrderItem {
   productId: string;
-  productName: string;
   quantity: number;
-  unitPrice: number;
-  subtotal: number;
+  unitPrice: number; // Precio pactado para esta reserva
 }
 
 export interface Order {
   id: string;
   customerId: string;
-  locationId?: string;
-  routeId?: string;
+  locationId: string; // ID de la sede exacta donde se debe entregar (vital para el mapa)
 
-  // ---> PROPIEDAD AGREGADA PARA VINCULACIÓN CON FACTURACIÓN <---
-  billingId?: string;
-
-  type: OrderType;
-  status: OrderStatus;
   items: OrderItem[];
-  totalAmount: number;
-  paymentMethod: PaymentMethod;
-  paymentStatus: PaymentStatus;
-  amountPaid: number;
-  scheduledDate: Date;
-  deliveredAt?: Date;
+
+  // Tiempos y Estado
+  expectedDeliveryDate: Date; // Para cuándo lo quiere el cliente
+  status: "PENDING" | "ASSIGNED" | "DELIVERED" | "CANCELLED";
+
+  // Vínculo Logístico (Se llena cuando el administrador arma la ruta)
+  manifestId?: string; // A qué camión se le asignó esta entrega
+
+  notes?: string; // Ej: "Llamar al llegar", "Tocar fuerte el timbre"
+
   createdAt: Date;
   updatedAt: Date;
 }

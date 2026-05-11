@@ -1,4 +1,4 @@
-import { adminDb } from "../firebase/admin";
+import { adminDb, adminAuth } from "../firebase/admin"; // <-- Agregamos adminAuth aquí
 import admin from "firebase-admin";
 import { User } from "@/core/entities/User";
 import { UserFormValues } from "@/core/validations/userSchema";
@@ -22,9 +22,6 @@ export const userRepository = {
     );
   },
 
-  /**
-   * Obtiene un usuario específico y limpia los Timestamps para Next.js
-   */
   async getById(id: string): Promise<any | null> {
     const doc = await adminDb.collection(COLLECTION).doc(id).get();
     if (!doc.exists) return null;
@@ -33,16 +30,16 @@ export const userRepository = {
     return {
       id: doc.id,
       ...data,
-      // Convertimos a string ISO para evitar el error de "Only plain objects" en Client Components
       createdAt: data.createdAt?.toDate()?.toISOString() || null,
       updatedAt: data.updatedAt?.toDate()?.toISOString() || null,
     };
   },
 
   /**
-   * Crea un documento usando un ID específico (El ID de Firebase Auth)
+   * Crea un documento y sincroniza los Custom Claims (Roles) con Firebase Auth
    */
   async createWithId(id: string, data: UserFormValues): Promise<void> {
+    // 1. Guardamos en Firestore para poder leerlo en las tablas visuales
     await adminDb
       .collection(COLLECTION)
       .doc(id)
@@ -51,8 +48,16 @@ export const userRepository = {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+
+    // 2. MAGIA: Inyectamos los roles directamente en el "pasaporte" de Firebase Auth
+    if (data.roles && data.roles.length > 0) {
+      await adminAuth.setCustomUserClaims(id, { roles: data.roles });
+    }
   },
 
+  /**
+   * Actualiza el documento y resincroniza los Custom Claims si los roles cambian
+   */
   async update(id: string, data: Partial<UserFormValues>): Promise<void> {
     await adminDb
       .collection(COLLECTION)
@@ -61,6 +66,11 @@ export const userRepository = {
         ...data,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+
+    // Si la actualización incluye un cambio de roles, actualizamos Auth
+    if (data.roles) {
+      await adminAuth.setCustomUserClaims(id, { roles: data.roles });
+    }
   },
 
   async toggleStatus(id: string, isActive: boolean): Promise<void> {

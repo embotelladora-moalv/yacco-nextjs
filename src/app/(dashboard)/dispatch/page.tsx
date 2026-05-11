@@ -1,60 +1,48 @@
-import { orderRepository } from "@/services/repositories/orderRepository";
-import { dailyRouteRepository } from "@/services/repositories/dailyRouteRepository";
-import { customerRepository } from "@/services/repositories/customerRepository";
-import { truckRepository } from "@/services/repositories/truckRepository";
-import { MapPin, Truck } from "lucide-react";
-import { DispatchBoard } from "./DispatchBoard";
+import { dispatchRepository } from "@/services/repositories/dispatchRepository";
+import { userRepository } from "@/services/repositories/userRepository";
+import { DispatchDashboard } from "./DispatchDashboard";
+
+export const dynamic = "force-dynamic";
 
 export default async function DispatchPage() {
-  // 1. Cargamos datos masivos en paralelo
-  const [allOrders, activeRoutes, customers, trucks] = await Promise.all([
-    orderRepository.getAll(), // Filtraremos en memoria para ahorrar lecturas si la base es pequeña
-    dailyRouteRepository.getActiveRoutes(),
-    customerRepository.getAll(),
-    truckRepository.getAll(),
-  ]);
+  // 1. Obtenemos todos los despachos
+  const rawDispatches = await dispatchRepository.getRecentDispatches();
 
-  // 2. Filtramos solo los pedidos que están esperando asignación
-  const pendingOrders = allOrders
-    .filter((order) => order.status === "RESERVED")
-    .map((order) => {
-      const customer = customers.find((c) => c.id === order.customerId);
-      return {
-        ...order,
-        customerName: customer?.name || "Cliente Desconocido",
-        customerAddress:
-          customer?.locations?.[0]?.address || "Dirección no registrada",
-      };
-    });
+  // 2. Serializamos los despachos (Convertimos Timestamps de Firebase a Strings ISO)
+  const dispatches = rawDispatches.map((dispatch: any) => ({
+    ...dispatch,
+    dispatchDate: dispatch.dispatchDate?.toDate
+      ? dispatch.dispatchDate.toDate().toISOString()
+      : dispatch.dispatchDate,
+    liquidatedAt: dispatch.liquidatedAt?.toDate
+      ? dispatch.liquidatedAt.toDate().toISOString()
+      : dispatch.liquidatedAt,
+    createdAt: dispatch.createdAt?.toDate
+      ? dispatch.createdAt.toDate().toISOString()
+      : dispatch.createdAt,
+    updatedAt: dispatch.updatedAt?.toDate
+      ? dispatch.updatedAt.toDate().toISOString()
+      : dispatch.updatedAt,
+  }));
 
-  // 3. Preparamos las rutas activas con el alias del camión
-  const availableRoutes = activeRoutes.map((route) => {
-    const truck = trucks.find((t) => t.id === route.truckId);
-    return {
-      id: route.id,
-      truckAlias: truck?.alias || "Camión sin nombre",
-      plateNumber: truck?.plateNumber || "N/A",
-    };
-  });
+  // 3. Obtenemos y serializamos los usuarios
+  const rawUsers = await userRepository.getAll();
+  const users = rawUsers.map((user) => ({
+    ...user,
+    createdAt:
+      user.createdAt instanceof Date
+        ? user.createdAt.toISOString()
+        : user.createdAt,
+    updatedAt:
+      user.updatedAt instanceof Date
+        ? user.updatedAt.toISOString()
+        : user.updatedAt,
+  }));
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-10">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-black text-slate-900 flex items-center gap-3">
-            <Truck className="h-8 w-8 text-blue-600" />
-            Centro de Despacho
-          </h1>
-          <p className="text-sm text-slate-500 font-medium mt-1">
-            Asignación de reservas telefónicas a las unidades en calle.
-          </p>
-        </div>
-      </div>
-
-      <DispatchBoard
-        pendingOrders={pendingOrders}
-        availableRoutes={availableRoutes}
-      />
+    <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4 sm:px-6">
+      {/* Ahora ambos arreglos contienen solo objetos planos (strings y números) */}
+      <DispatchDashboard dispatches={dispatches} users={users as any} />
     </div>
   );
 }

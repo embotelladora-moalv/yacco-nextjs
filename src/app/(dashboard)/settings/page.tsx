@@ -1,6 +1,7 @@
 import { settingsRepository } from "@/services/repositories/settingsRepository";
 import { Settings } from "lucide-react";
 import { SettingsManager } from "./SettingsManager";
+import { DangerZoneSection } from "./DangerZoneSection";
 
 export default async function SettingsPage() {
   const settings = await settingsRepository.getSettings();
@@ -21,6 +22,7 @@ export default async function SettingsPage() {
       </div>
 
       <SettingsManager settings={settings} />
+      <DangerZoneSection />
     </div>
   );
 }

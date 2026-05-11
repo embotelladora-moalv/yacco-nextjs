@@ -1,34 +1,28 @@
 import { z } from "zod";
 
 export const orderItemSchema = z.object({
-  productId: z.string().min(1),
-  productName: z.string(),
-  quantity: z.number().int().min(1),
-  unitPrice: z.number().min(0),
-  subtotal: z.number().min(0),
-  isReplacement: z.boolean().default(false), // Requerimiento: Cambio por mal estado
-  replacementReason: z.string().optional(),
+  productId: z.string().min(1, "Debe seleccionar un producto"),
+  quantity: z.coerce.number().min(1, "Debe pedir al menos 1 unidad"),
+  unitPrice: z.coerce.number().min(0, "El precio no puede ser negativo"),
 });
 
 export const orderSchema = z.object({
-  customerId: z.string().min(1, "Seleccione un cliente"),
-  locationId: z.string().optional(), // Requerimiento: Múltiples ubicaciones
-  routeId: z.string().optional(),
-  type: z.enum(["PRE_ORDER", "ROUTE_SALE", "PLANT_SALE"]),
-  status: z.enum(["RESERVED", "ASSIGNED", "DELIVERED", "CANCELLED"]),
+  customerId: z
+    .string()
+    .min(1, "Debe seleccionar el cliente que hace el pedido"),
+  locationId: z
+    .string()
+    .min(1, "Debe indicar en qué sede o local se entregará"),
 
-  items: z.array(orderItemSchema).min(1),
+  items: z
+    .array(orderItemSchema)
+    .min(1, "El pedido debe tener al menos un producto"),
 
-  // --- NUEVOS CAMPOS DEL ENUNCIADO ---
-  returnedDrums: z.record(z.string(), z.number()).default({}), // Retorno de vacíos
-  loanedAccessories: z.record(z.string(), z.number()).default({}), // Préstamo de surtidores
-  // -----------------------------------
+  expectedDeliveryDate: z
+    .string()
+    .min(1, "Debe indicar la fecha esperada de entrega"),
 
-  totalAmount: z.number().min(0),
-  paymentMethod: z.enum(["CASH", "YAPE", "PLIN", "TRANSFER", "CREDIT"]),
-  paymentStatus: z.enum(["PENDING", "PARTIAL", "PAID"]),
-  amountPaid: z.number().min(0),
-  scheduledDate: z.string().min(1),
+  notes: z.string().optional(),
 });
 
 export type OrderFormValues = z.infer<typeof orderSchema>;

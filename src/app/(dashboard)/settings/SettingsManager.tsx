@@ -27,6 +27,18 @@ export function SettingsManager({ settings }: SettingsManagerProps) {
       title: "Etiquetas de Clientes (Zonas/Tipos)",
       description: "Categorías para organizar clientes (Ej: Parque, VIP).",
     },
+    // NUEVO: Gestión de tipos de empaque
+    {
+      key: "packagingTypes",
+      title: "Tipos de Empaque (Catálogo)",
+      description: "Formatos de envases físicos (Ej: Bidón 20L, Botella 1L).",
+    },
+    // NUEVO: Gestión de marcas de maquila
+    {
+      key: "maquilaBrands",
+      title: "Marcas de Maquila",
+      description: "Nombres de clientes externos para los que se envasa agua.",
+    },
     {
       key: "productionWasteReasons",
       title: "Motivos de Merma (Producción)",
@@ -121,7 +133,7 @@ export function SettingsManager({ settings }: SettingsManagerProps) {
           >
             <Input
               name="item"
-              placeholder="Escriba un nuevo motivo..."
+              placeholder="Escriba un nuevo valor..."
               className="h-10 border-slate-200 focus-visible:ring-blue-600 font-medium"
               disabled={loadingKey === `add-${catalog.key}`}
             />

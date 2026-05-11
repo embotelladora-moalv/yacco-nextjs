@@ -4,8 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  Package,
-  ClipboardList,
   Archive,
   Settings,
   LogOut,
@@ -13,11 +11,11 @@ import {
   Users,
   Truck,
   FileText,
-  MapPin,
-  Map,
   Navigation,
   ShoppingCart,
   HandCoins,
+  Wallet,
+  ClipboardCheck,
 } from "lucide-react";
 import { logoutAction } from "@/app/login/actions";
 
@@ -25,7 +23,8 @@ interface SidebarProps {
   user: {
     name: string;
     email?: string;
-    role?: string;
+    // ACTUALIZADO: Ahora esperamos un arreglo de roles, tal como está en Firebase
+    roles?: string[];
   } | null;
 }
 
@@ -37,31 +36,31 @@ const navigationGroups = [
   {
     title: "Planta y Producción",
     items: [
-      { name: "Kardex", href: "/inventory", icon: Archive },
-      { name: "Producción", href: "/production", icon: ClipboardList },
-      { name: "Catálogo", href: "/products", icon: Package },
+      { name: "Kardex de Envases", href: "/inventory", icon: Archive },
+      // { name: "Producción", href: "/production", icon: ClipboardList },
     ],
   },
   {
     title: "Ventas y Clientes",
     items: [
-      { name: "Directorio Clientes", href: "/customers", icon: Users },
-      { name: "Pedidos y Ventas", href: "/orders", icon: ShoppingCart },
-      { name: "Cobranzas", href: "/collections", icon: HandCoins }, // Módulo de amortización
-      { name: "Facturación", href: "/billing", icon: FileText },
+      { name: "Clientes (CRM)", href: "/customers", icon: Users },
+      { name: "Pedidos / Reservas", href: "/orders", icon: ClipboardCheck },
+      { name: "Historial de Ventas", href: "/sales", icon: ShoppingCart },
     ],
   },
   {
     title: "Logística y Flota",
     items: [
-      { name: "Monitoreo de Rutas", href: "/routes", icon: Map },
-      { name: "Despacho Rápido", href: "/dispatch", icon: Navigation }, // Centro de asignación
+      { name: "Despacho y Rutas", href: "/dispatch", icon: Navigation },
       { name: "Vehículos", href: "/trucks", icon: Truck },
     ],
   },
   {
-    title: "Administración",
+    title: "Administración y Caja",
     items: [
+      { name: "Finanzas y Gastos", href: "/finance", icon: Wallet },
+      { name: "Cobranzas", href: "/collections", icon: HandCoins },
+      { name: "Facturación", href: "/billing", icon: FileText },
       { name: "Usuarios", href: "/users", icon: Users },
       { name: "Ajustes", href: "/settings", icon: Settings },
     ],
@@ -70,26 +69,28 @@ const navigationGroups = [
 
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
-  const userRole = user?.role || "ADMIN";
 
+  // Extraemos el array de roles (Si no tiene, le asignamos "ADMIN" temporalmente por seguridad/desarrollo)
+  const userRoles =
+    user?.roles && user.roles.length > 0 ? user.roles : ["ADMIN"];
+
+  // Función Helper: Verifica si el usuario tiene al menos uno de los roles requeridos
+  const hasPermission = (allowedRoles: string[]) => {
+    if (userRoles.includes("ADMIN")) return true; // El ADMIN siempre ve todo
+    return userRoles.some((role) => allowedRoles.includes(role));
+  };
+
+  // Filtramos los grupos según los roles del usuario
   const visibleGroups = navigationGroups.filter((group) => {
-    if (group.title === "Administración" && userRole !== "ADMIN") return false;
-    if (
-      group.title === "Logística y Flota" &&
-      !["ADMIN", "PRODUCTION", "SALES"].includes(userRole)
-    )
-      return false;
-    if (
-      group.title === "Ventas y Clientes" &&
-      !["ADMIN", "SALES"].includes(userRole)
-    )
-      return false;
-    if (
-      group.title === "Planta y Producción" &&
-      !["ADMIN", "PRODUCTION"].includes(userRole)
-    )
-      return false;
-    return true;
+    if (group.title === "Administración y Caja")
+      return hasPermission(["ADMIN"]);
+    if (group.title === "Logística y Flota")
+      return hasPermission(["ADMIN", "PRODUCTION", "SALES", "DISPATCHER"]);
+    if (group.title === "Ventas y Clientes")
+      return hasPermission(["ADMIN", "SALES"]);
+    if (group.title === "Planta y Producción")
+      return hasPermission(["ADMIN", "PRODUCTION"]);
+    return true; // El grupo "Principal" (Dashboard) lo ven todos
   });
 
   const initials = user?.name
@@ -99,10 +100,11 @@ export function Sidebar({ user }: SidebarProps) {
         .join("")
         .toUpperCase()
         .substring(0, 2)
-    : "Y";
+    : "OP";
 
   return (
     <div className="flex h-full w-full flex-col bg-white border-r">
+      {/* LOGO SECCIÓN */}
       <div className="flex h-16 items-center gap-3 border-b px-6 shrink-0 bg-white">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-700 text-white shadow-lg">
           <Droplet className="h-6 w-6" />
@@ -117,6 +119,7 @@ export function Sidebar({ user }: SidebarProps) {
         </div>
       </div>
 
+      {/* MENÚ DE NAVEGACIÓN */}
       <nav className="flex-1 space-y-7 px-4 py-8 overflow-y-auto overflow-x-hidden">
         {visibleGroups.map((group) => (
           <div key={group.title}>
@@ -152,6 +155,7 @@ export function Sidebar({ user }: SidebarProps) {
         ))}
       </nav>
 
+      {/* PERFIL Y CIERRE DE SESIÓN */}
       <div className="border-t p-4 bg-gray-50/40">
         <div className="flex items-center gap-3 mb-5 px-2">
           <div className="h-10 w-10 rounded-full bg-blue-700 text-white flex items-center justify-center font-bold text-sm shadow-md border-2 border-white ring-1 ring-blue-100">
@@ -161,8 +165,9 @@ export function Sidebar({ user }: SidebarProps) {
             <span className="text-sm font-bold text-gray-900 truncate">
               {user?.name || "Operador Yacco"}
             </span>
-            <span className="text-[9px] font-extrabold text-blue-700 bg-blue-50 px-1.5 rounded uppercase w-fit">
-              {userRole}
+            {/* ACTUALIZADO: Muestra todos los roles del usuario separados por una coma */}
+            <span className="text-[9px] font-extrabold text-blue-700 bg-blue-50 px-1.5 rounded uppercase w-fit truncate">
+              {userRoles.join(", ")}
             </span>
           </div>
         </div>

@@ -34,9 +34,12 @@ export async function proxy(request: NextRequest) {
       // Verificamos el rol directamente en el Proxy usando el Admin SDK
       const decodedClaims = await adminAuth.verifySessionCookie(sessionValue);
 
-      if (decodedClaims.role !== "ADMIN") {
+      // ACTUALIZADO: Leemos el array 'roles' y verificamos si incluye "ADMIN"
+      const userRoles = (decodedClaims.roles as string[]) || [];
+
+      if (!userRoles.includes("ADMIN")) {
         // Si no es ADMIN, lo desviamos al Kardex (Acceso denegado a configuración)
-        return NextResponse.redirect(new URL("/inventory", request.url));
+        return NextResponse.redirect(new URL("/dashboard", request.url));
       }
     } catch (error) {
       return NextResponse.redirect(new URL("/login", request.url));
@@ -48,7 +51,11 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/inventory") ||
     pathname.startsWith("/production") ||
     pathname.startsWith("/products") ||
-    pathname.startsWith("/dashboard");
+    pathname.startsWith("/dashboard") ||
+    // Aseguramos que las nuevas rutas también pasen por el proxy de sesión si es necesario
+    pathname.startsWith("/customers") ||
+    pathname.startsWith("/dispatch") ||
+    pathname.startsWith("/collections");
 
   if (isProtectedRoute && !sessionValue) {
     return NextResponse.redirect(new URL("/login", request.url));
@@ -71,6 +78,9 @@ export const config = {
     "/dashboard/:path*",
     "/users/:path*",
     "/settings/:path*",
+    "/customers/:path*",
+    "/dispatch/:path*",
+    "/collections/:path*",
     "/login",
   ],
 };

@@ -1,74 +1,35 @@
 import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
-import { OrderFormValues } from "@/core/validations/orderSchema";
 import { Order } from "@/core/entities/Order";
+import { OrderFormValues } from "@/core/validations/orderSchema";
 
-const COLLECTION = "orders";
+const ORDERS_COLLECTION = "orders";
 
 export const orderRepository = {
   /**
-   * Crea un pedido utilizando una Transacción.
-   * Si es a crédito, actualiza automáticamente la deuda del cliente.
-   * También actualiza la 'lastSaleDate' del cliente para el CRM.
+   * Crea un nuevo pedido en estado PENDIENTE.
    */
-  async createOrderTransaction(data: OrderFormValues): Promise<string> {
-    let newOrderId = "";
-
-    await adminDb.runTransaction(async (transaction) => {
-      // 1. Obtenemos la referencia del cliente
-      const customerRef = adminDb.collection("customers").doc(data.customerId);
-      const customerDoc = await transaction.get(customerRef);
-
-      if (!customerDoc.exists)
-        throw new Error("Cliente no encontrado en el sistema.");
-
-      // 2. Calculamos si hay un incremento en la deuda
-      let debtIncrease = 0;
-      if (data.paymentMethod === "CREDIT" || data.paymentStatus === "PARTIAL") {
-        debtIncrease = data.totalAmount - data.amountPaid;
-      }
-
-      // 3. Preparamos el documento del Pedido
-      const orderRef = adminDb.collection(COLLECTION).doc();
-      newOrderId = orderRef.id;
-
-      const orderData: any = {
-        ...data,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      };
-
-      // Si el pedido ya nace entregado (Ej: Venta en Planta), registramos la fecha de entrega
-      if (data.status === "DELIVERED") {
-        orderData.deliveredAt = admin.firestore.FieldValue.serverTimestamp();
-      }
-
-      transaction.set(orderRef, orderData);
-
-      // 4. Actualizamos el CRM y las finanzas del Cliente
-      const customerUpdates: any = {
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        lastSaleDate: admin.firestore.FieldValue.serverTimestamp(),
-      };
-
-      if (debtIncrease > 0) {
-        const currentDebt = customerDoc.data()?.debtAmount || 0;
-        customerUpdates.debtAmount = currentDebt + debtIncrease;
-      }
-
-      transaction.update(customerRef, customerUpdates);
+  async createOrder(data: OrderFormValues): Promise<string> {
+    const docRef = await adminDb.collection(ORDERS_COLLECTION).add({
+      ...data,
+      // Convertimos el string YYYY-MM-DD del formulario a una fecha real
+      expectedDeliveryDate: new Date(data.expectedDeliveryDate),
+      status: "PENDING",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return newOrderId;
+    return docRef.id;
   },
 
   /**
-   * Obtiene el historial de pedidos (para la tabla principal)
+   * Obtiene todos los pedidos pendientes (Para la pantalla de "Armar Rutas")
    */
-  async getAll(): Promise<Order[]> {
+  async getPendingOrders(): Promise<Order[]> {
     const snapshot = await adminDb
-      .collection(COLLECTION)
-      .orderBy("createdAt", "desc")
+      .collection(ORDERS_COLLECTION)
+      .where("status", "==", "PENDING")
+      .orderBy("expectedDeliveryDate", "asc")
       .get();
 
     return snapshot.docs.map((doc) => {
@@ -76,44 +37,103 @@ export const orderRepository = {
       return {
         id: doc.id,
         ...data,
-        scheduledDate: data.scheduledDate
-          ? new Date(data.scheduledDate)
-          : new Date(),
-        deliveredAt: data.deliveredAt?.toDate() || undefined,
-        createdAt: data.createdAt?.toDate() || new Date(),
-        updatedAt: data.updatedAt?.toDate() || new Date(),
-      } as Order;
+        // Serialización segura de fechas para Next.js Client Components
+        expectedDeliveryDate:
+          data.expectedDeliveryDate?.toDate?.()?.toISOString() || null,
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+      } as any;
     });
   },
 
   /**
-   * Obtiene un pedido específico por su ID.
+   * Asigna un pedido a un camión (Manifiesto)
    */
-  async getById(id: string): Promise<Order | null> {
-    const doc = await adminDb.collection(COLLECTION).doc(id).get();
+  async assignOrderToManifest(
+    orderId: string,
+    manifestId: string,
+  ): Promise<void> {
+    await adminDb.collection(ORDERS_COLLECTION).doc(orderId).update({
+      status: "ASSIGNED",
+      manifestId,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  },
+
+  /**
+   * Cancela un pedido
+   */
+  async cancelOrder(orderId: string): Promise<void> {
+    await adminDb.collection(ORDERS_COLLECTION).doc(orderId).update({
+      status: "CANCELLED",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  },
+
+  /**
+   * Obtiene un pedido específico para poder editarlo
+   */
+  async getOrderById(id: string): Promise<Order | null> {
+    const doc = await adminDb.collection(ORDERS_COLLECTION).doc(id).get();
     if (!doc.exists) return null;
 
-    const data = doc.data()!;
+    const data = doc.data();
+    if (!data) return null;
+
     return {
       id: doc.id,
       ...data,
-      scheduledDate: data.scheduledDate
-        ? new Date(data.scheduledDate)
-        : new Date(),
-      deliveredAt: data.deliveredAt?.toDate() || undefined,
-      createdAt: data.createdAt?.toDate() || new Date(),
-      updatedAt: data.updatedAt?.toDate() || new Date(),
-    } as Order;
+      expectedDeliveryDate:
+        data.expectedDeliveryDate?.toDate?.()?.toISOString().split("T")[0] ||
+        null, // Formato YYYY-MM-DD para el form
+      createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+      updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+    } as any;
   },
 
   /**
-   * Asigna un pedido reservado a una ruta activa (Camión).
+   * Actualiza un pedido (Solo si está PENDING)
    */
-  async assignToRoute(orderId: string, routeId: string): Promise<void> {
-    await adminDb.collection(COLLECTION).doc(orderId).update({
-      status: "ASSIGNED",
-      routeId: routeId,
+  async updateOrder(id: string, data: Partial<OrderFormValues>): Promise<void> {
+    const docRef = adminDb.collection(ORDERS_COLLECTION).doc(id);
+    const updateData: any = {
+      ...data,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (data.expectedDeliveryDate) {
+      updateData.expectedDeliveryDate = new Date(data.expectedDeliveryDate);
+    }
+
+    await docRef.update(updateData);
+  },
+
+  /**
+   * Asignación Masiva: Envía múltiples pedidos a un solo camión
+   */
+  async assignOrdersBulk(
+    orderIds: string[],
+    manifestId: string,
+  ): Promise<void> {
+    const batch = adminDb.batch(); // Inicia la transacción en lote
+
+    orderIds.forEach((orderId) => {
+      const orderRef = adminDb.collection(ORDERS_COLLECTION).doc(orderId);
+      batch.update(orderRef, {
+        status: "ASSIGNED",
+        manifestId,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
     });
+
+    await batch.commit(); // Ejecuta todo de golpe
+  },
+
+  /**
+   * Elimina físicamente un pedido de la base de datos (Hard Delete)
+   * Útil para limpiar errores de digitación.
+   */
+  async deleteOrder(id: string): Promise<void> {
+    await adminDb.collection(ORDERS_COLLECTION).doc(id).delete();
   },
 };

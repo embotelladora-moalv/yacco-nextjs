@@ -54,19 +54,14 @@ export async function registerProductionAction(
   try {
     const parsed = productionBatchSchema.parse(data);
 
-    // Generamos un número de lote automático basado en la fecha exacta (Ej: L-1715298123)
-    // Esto asegura que cada lote sea único en la trazabilidad de Moalv S.a.C.
-    const generatedLotNumber = `L-${Date.now()}`;
-
     await inventoryRepository.registerProduction({
       productId: parsed.productId,
       quantityProduced: parsed.quantityProduced,
-      productionDate: new Date(parsed.productionDate),
+      productionDate: new Date(parsed.productionDate), // Pasamos la fecha exacta del formulario
       isTollManufacturing: parsed.isTollManufacturing,
-      brandId: parsed.brandId,
+      brandName: data.isTollManufacturing ? data.brandName || "" : "",
       notes: parsed.notes,
-      managerId: "ADMIN_ID", // TODO: Reemplazar con usuario en sesión
-      lotNumber: generatedLotNumber, // <--- AQUÍ ESTÁ LA SOLUCIÓN
+      managerId: "ADMIN_ID", // TODO: Reemplazar con usuario real
     });
 
     revalidatePath("/inventory");

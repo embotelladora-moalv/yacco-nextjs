@@ -4,57 +4,55 @@ import { customerRepository } from "@/services/repositories/customerRepository";
 import {
   customerSchema,
   CustomerFormValues,
-} from "@/core/validations/customerSchema";
+} from "@/core/validations/crmSchemas";
 import { revalidatePath } from "next/cache";
-
-export type ActionResponse = { success: boolean; error?: string };
+import { randomUUID } from "crypto";
 
 export async function saveCustomerAction(
   data: CustomerFormValues,
-): Promise<ActionResponse> {
+  id?: string,
+) {
   try {
+    // 1. Validación estricta con Zod
     const parsedData = customerSchema.parse(data);
-    await customerRepository.create(parsedData);
 
-    revalidatePath("/customers");
-    revalidatePath("/customers/map"); // Refresca el mapa si hay nuevas ubicaciones
+    // 2. Garantizar que toda ubicación tenga un ID único antes de ir a BD
+    const locationsWithIds = parsedData.locations.map((loc) => ({
+      ...loc,
+      id: loc.id || randomUUID(), // Genera un ID si viene undefined del formulario
+    }));
 
-    return { success: true };
-  } catch (error: any) {
-    console.error("Error saving customer:", error);
-    return { success: false, error: "Error al registrar el cliente." };
-  }
-}
-
-export async function updateCustomerAction(
-  id: string,
-  data: CustomerFormValues,
-): Promise<ActionResponse> {
-  try {
-    const parsedData = customerSchema.parse(data);
-    await customerRepository.update(id, parsedData);
-
-    revalidatePath("/customers");
-    revalidatePath("/customers/map");
-
-    return { success: true };
-  } catch (error: any) {
-    console.error("Error updating customer:", error);
-    return {
-      success: false,
-      error: "Error al actualizar los datos del cliente.",
+    // Preparamos la data limpia que coincide exactamente con la Entidad
+    const dataToSave = {
+      ...parsedData,
+      locations: locationsWithIds,
     };
-  }
-}
 
-export async function deleteCustomerAction(
-  id: string,
-): Promise<ActionResponse> {
-  try {
-    await customerRepository.deactivate(id);
+    // 3. Ejecutar Creación o Edición
+    if (id) {
+      await customerRepository.updateCustomer(id, dataToSave);
+    } else {
+      await customerRepository.createCustomer(dataToSave);
+    }
+
+    // 4. Limpiar caché para que la tabla se actualice al instante
     revalidatePath("/customers");
     return { success: true };
   } catch (error: any) {
-    return { success: false, error: "Error al dar de baja al cliente." };
+    console.error("Error al guardar cliente:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function toggleCustomerStatusAction(
+  id: string,
+  isActive: boolean,
+) {
+  try {
+    await customerRepository.toggleCustomerStatus(id, isActive);
+    revalidatePath("/customers");
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
   }
 }

@@ -15,8 +15,8 @@ export async function getUserSession() {
       uid: decodedClaims.uid,
       email: decodedClaims.email,
       name: decodedClaims.name || "Usuario Yacco",
-      // 2. Extraemos el rol que guardamos en los Custom Claims
-      role: (decodedClaims.role as string) || "PLANTA", // Por defecto rol básico
+      // ACTUALIZADO: Ahora extraemos un array de 'roles' en lugar de un 'role' único
+      roles: (decodedClaims.roles as string[]) || ["PLANTA"], // Por defecto un rol básico en array
     };
   } catch (error) {
     return null;

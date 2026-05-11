@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useState, useEffect } from "react";
+import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   productionBatchSchema,
@@ -12,7 +12,6 @@ import { Product } from "@/core/entities/Inventory";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -22,7 +21,15 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Factory, Calendar, PackagePlus, FileText, Save } from "lucide-react";
+import {
+  Factory,
+  Calendar,
+  PackagePlus,
+  FileText,
+  Save,
+  ShieldCheck,
+  Factory as FactoryIcon,
+} from "lucide-react";
 
 interface ProductionModalProps {
   products: Product[];
@@ -32,7 +39,7 @@ export function ProductionModal({ products }: ProductionModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, setIsPending] = useState(false);
 
-  // Filtramos para mostrar solo los productos que requieren producción (ej. no accesorios)
+  // Solo productos que se pueden llenar (no accesorios)
   const producibleProducts = products.filter(
     (p) => p.operationalCategory !== "ACCESSORY",
   );
@@ -42,14 +49,31 @@ export function ProductionModal({ products }: ProductionModalProps) {
     defaultValues: {
       productId: "",
       quantityProduced: 0,
-      productionDate: new Date().toISOString().split("T")[0], // Fecha de hoy por defecto (YYYY-MM-DD)
+      productionDate: new Date().toISOString().split("T")[0],
       isTollManufacturing: false,
-      brandId: "",
+      brandName: "",
       notes: "",
     },
   });
 
+  // Observamos el producto seleccionado para automatizar la Maquila
+  const selectedProductId = form.watch("productId");
+
+  useEffect(() => {
+    const product = producibleProducts.find((p) => p.id === selectedProductId);
+
+    if (product) {
+      // Si el producto en el catálogo ya es Maquila, marcamos el lote automáticamente
+      form.setValue("isTollManufacturing", product.isMaquila || false);
+      form.setValue("brandName", product.brandName || "");
+    } else {
+      form.setValue("isTollManufacturing", false);
+      form.setValue("brandName", "");
+    }
+  }, [selectedProductId, producibleProducts, form]);
+
   const isMaquila = form.watch("isTollManufacturing");
+  const currentBrand = form.watch("brandName");
 
   const onSubmit = async (values: ProductionBatchFormValues) => {
     setIsPending(true);
@@ -57,177 +81,163 @@ export function ProductionModal({ products }: ProductionModalProps) {
     setIsPending(false);
 
     if (result.success) {
-      toast.success("Lote de producción registrado exitosamente");
+      toast.success("Producción registrada y stock actualizado");
       form.reset();
-      setIsOpen(false); // Cerramos el modal
+      setIsOpen(false);
     } else {
-      toast.error("Error en producción", { description: result.error });
+      toast.error("Error", { description: result.error });
     }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button className="bg-slate-900 hover:bg-slate-800 font-bold shadow-md">
+        <Button className="bg-slate-900 hover:bg-slate-800 font-bold shadow-md  px-6 rounded-xl transition-all">
           <Factory className="mr-2 h-4 w-4 text-orange-400" /> Declarar
           Producción
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-xl bg-white rounded-3xl overflow-hidden border-0 p-0">
-        <DialogHeader className="bg-slate-900 p-6">
-          <DialogTitle className="text-2xl font-black text-white flex items-center gap-2">
-            <Factory className="h-6 w-6 text-orange-400" />
-            Declaración de Producción
+      <DialogContent className="sm:max-w-xl bg-white rounded-[2.5rem] overflow-hidden border-0 p-0 shadow-2xl">
+        <DialogHeader className="bg-slate-900 p-8 text-white">
+          <DialogTitle className="text-2xl font-black flex items-center gap-3">
+            <FactoryIcon className="h-7 w-7 text-orange-400" />
+            Orden de Llenado
           </DialogTitle>
-          <DialogDescription className="text-slate-300 font-medium">
-            Registre los lotes de llenado. El sistema descontará automáticamente
-            los envases vacíos necesarios.
+          <DialogDescription className="text-slate-400 font-medium">
+            El sistema descontará automáticamente los envases vacíos del
+            inventario.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={form.handleSubmit(onSubmit)} className="p-6 space-y-6">
+        <form onSubmit={form.handleSubmit(onSubmit)} className="p-8 space-y-8">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {/* Fecha de Producción */}
+            {/* Fecha */}
             <div className="space-y-2">
-              <Label className="font-bold flex items-center gap-2 text-slate-700">
-                <Calendar className="h-4 w-4 text-slate-400" /> Fecha del Lote
+              <Label className="font-bold text-slate-700 ml-1">
+                Fecha de Producción
               </Label>
-              <Input
-                {...form.register("productionDate")}
-                type="date"
-                className="h-11 font-medium border-slate-200"
-              />
-              {form.formState.errors.productionDate && (
-                <p className="text-xs text-red-500 font-bold">
-                  {form.formState.errors.productionDate.message}
-                </p>
-              )}
+              <div className="relative">
+                <Calendar className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                <Input
+                  {...form.register("productionDate")}
+                  type="date"
+                  className="h-11 pl-10 rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white transition-colors"
+                />
+              </div>
             </div>
 
-            {/* Producto Seleccionado */}
+            {/* Producto */}
             <div className="space-y-2">
-              <Label className="font-bold flex items-center gap-2 text-slate-700">
-                <PackagePlus className="h-4 w-4 text-slate-400" /> Producto
-                (SKU)
+              <Label className="font-bold text-slate-700 ml-1">
+                Producto / SKU
               </Label>
-              <select
-                {...form.register("productId")}
-                className="w-full h-11 px-3 rounded-md border border-slate-200 bg-white font-medium outline-none focus:ring-2 focus:ring-blue-600"
-              >
-                <option value="">-- Seleccione un producto --</option>
-                {producibleProducts.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.sku})
-                  </option>
-                ))}
-              </select>
-              {form.formState.errors.productId && (
-                <p className="text-xs text-red-500 font-bold">
-                  {form.formState.errors.productId.message}
-                </p>
-              )}
+              <div className="relative">
+                <PackagePlus className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                <select
+                  {...form.register("productId")}
+                  className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 bg-slate-50/50 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white transition-all appearance-none"
+                >
+                  <option value="">Seleccione SKU...</option>
+                  {producibleProducts.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} {p.isMaquila ? `(Maquila)` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
-          {/* Cantidad Producida */}
-          <div className="space-y-2 bg-blue-50 p-4 rounded-xl border border-blue-100">
-            <Label className="font-black text-blue-900 text-lg">
-              Cantidad Producida (Unidades Llenas)
+          {/* Cantidad con visualización de impacto */}
+          <div className="space-y-3 bg-blue-600 p-8 rounded-[2rem] shadow-lg shadow-blue-600/20 text-white">
+            <Label className="font-black text-blue-100 text-sm uppercase tracking-widest ml-1">
+              Unidades a Producir
             </Label>
             <Input
               {...form.register("quantityProduced")}
               type="number"
               min="1"
-              className="h-14 text-2xl font-black text-blue-700 border-blue-200"
+              placeholder="0"
+              className="h-16 text-4xl font-black bg-transparent border-0 border-b-2 border-blue-400 rounded-none focus:ring-0 focus:border-white transition-all text-white placeholder:text-blue-400"
             />
-            {form.formState.errors.quantityProduced && (
-              <p className="text-xs text-red-500 font-bold">
-                {form.formState.errors.quantityProduced.message}
-              </p>
-            )}
+            <p className="text-[10px] font-bold text-blue-200 italic flex items-center gap-1 mt-2">
+              <ShieldCheck className="h-3 w-3" /> Se validará disponibilidad de
+              envases vacíos antes de procesar.
+            </p>
           </div>
 
-          {/* Sección de Maquila */}
-          <div className="space-y-4 border-t border-slate-100 pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="font-bold text-slate-800 text-base block">
-                  ¿Es Producción de Maquila?
-                </Label>
-                <span className="text-xs text-slate-500 font-medium">
-                  Llenado para otras marcas.
-                </span>
+          {/* Info de Maquila (Automática y Solo Lectura) */}
+          {isMaquila && (
+            <div className="p-5 bg-purple-50 border-2 border-purple-100 rounded-2xl flex items-center justify-between animate-in fade-in zoom-in-95">
+              <div className="flex items-center gap-3">
+                <div className="bg-purple-600 p-2 rounded-lg text-white">
+                  <Factory className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-purple-600 uppercase tracking-tighter">
+                    Lote de Maquila Detectado
+                  </p>
+                  <p className="text-lg font-black text-purple-900 leading-none">
+                    {currentBrand}
+                  </p>
+                </div>
               </div>
-              <Controller
-                name="isTollManufacturing"
-                control={form.control}
-                render={({ field }) => (
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                )}
+              <BadgeCheck className="h-8 w-8 text-purple-200" />
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label className="font-bold text-slate-700 text-sm ml-1">
+              Notas u Observaciones
+            </Label>
+            <div className="relative">
+              <FileText className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+              <Input
+                {...form.register("notes")}
+                placeholder="Ej: Turno mañana, operador Carlos..."
+                className="h-11 pl-10 rounded-xl border-slate-200 bg-slate-50/50"
               />
             </div>
-
-            {isMaquila && (
-              <div className="space-y-2 animate-in slide-in-from-top-2">
-                <Label className="font-bold text-slate-700">
-                  Nombre de la Marca (Maquila)
-                </Label>
-                <Input
-                  {...form.register("brandId")}
-                  placeholder="Ej: Agua Vida, San Luis..."
-                  className="h-11 border-slate-200"
-                />
-                {form.formState.errors.brandId && (
-                  <p className="text-xs text-red-500 font-bold">
-                    {form.formState.errors.brandId.message}
-                  </p>
-                )}
-              </div>
-            )}
           </div>
 
-          {/* Notas Adicionales */}
-          <div className="space-y-2">
-            <Label className="font-bold flex items-center gap-2 text-slate-700">
-              <FileText className="h-4 w-4 text-slate-400" /> Notas del
-              Encargado (Opcional)
-            </Label>
-            <Input
-              {...form.register("notes")}
-              placeholder="Observaciones sobre este lote..."
-              className="h-11 border-slate-200"
-            />
-          </div>
-
-          <div className="pt-4 flex justify-end gap-3">
+          <div className="pt-2 flex gap-4">
             <Button
               type="button"
               variant="ghost"
               onClick={() => setIsOpen(false)}
-              className="font-bold"
+              className="flex-1 h-12 rounded-xl font-bold text-slate-500 hover:bg-slate-100"
             >
               Cancelar
             </Button>
             <Button
               type="submit"
               disabled={isPending}
-              className="bg-blue-700 hover:bg-blue-800 font-black px-8"
+              className="flex-[2] h-12 bg-slate-900 hover:bg-slate-800 font-black text-white rounded-xl shadow-xl transition-all"
             >
-              {isPending ? (
-                "Registrando..."
-              ) : (
-                <>
-                  <Save className="mr-2 h-4 w-4" /> Confirmar Lote
-                </>
-              )}
+              {isPending ? "Sincronizando..." : "Confirmar Producción"}
             </Button>
           </div>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function BadgeCheck({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+      />
+    </svg>
   );
 }

@@ -5,5 +5,6 @@ export interface SystemSettings {
   bottleChangeReasons: string[];
   debtReasons: string[];
   packagingTypes: string[]; // <--- Agrega esta línea
+  maquilaBrands: string[];
   updatedAt: Date;
 }

@@ -2,7 +2,8 @@ import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { SystemSettings } from "@/core/entities/SystemSettings";
 
-const SETTINGS_DOC = "settings/catalogs";
+// ACTUALIZADO: Ahora apuntamos a la colección unificada que creamos en el seeder
+const SETTINGS_DOC = "systemSettings/config";
 
 export const settingsRepository = {
   /**
@@ -11,9 +12,11 @@ export const settingsRepository = {
   async getSettings(): Promise<SystemSettings> {
     const doc = await adminDb.doc(SETTINGS_DOC).get();
 
+    // Si por alguna razón el script no corrió o el documento no existe, lo creamos con todos los datos
     if (!doc.exists) {
       const defaultSettings: SystemSettings = {
-        clientTags: ["VIP", "Mayorista", "Parque", "Casa"],
+        clientTags: ["VIP", "Mayorista", "Bodega", "Empresa"],
+        packagingTypes: ["Bidón 20L", "Bidón 7L", "Botella 1L", "Surtidor"],
         productionWasteReasons: [
           "Falla de sellado",
           "Bidón fisurado de fábrica",
@@ -21,10 +24,10 @@ export const settingsRepository = {
         routeWasteReasons: ["Caída en reparto", "Robo/Pérdida"],
         bottleChangeReasons: ["Agua turbia", "Caño goteando", "Sabor extraño"],
         debtReasons: ["Saldo inicial", "Penalidad por bidón perdido"],
-        packagingTypes: ["Bidón (Jug)", "Botella (Bottle)", "Caja", "Surtidor"], // <--- Agrega esta línea
+        maquilaBrands: [], // <--- Agregado en los valores por defecto
         updatedAt: new Date(),
       };
-      // ... resto de tu código
+
       await adminDb.doc(SETTINGS_DOC).set({
         ...defaultSettings,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -33,8 +36,17 @@ export const settingsRepository = {
     }
 
     const data = doc.data()!;
+
+    // Mapeo seguro: Si el documento existe pero le falta alguna lista (porque la acabamos de inventar),
+    // devolvemos un arreglo vacío o por defecto para que el .map() en el frontend no explote.
     return {
-      ...data,
+      clientTags: data.clientTags || [],
+      packagingTypes: data.packagingTypes || [],
+      productionWasteReasons: data.productionWasteReasons || [],
+      routeWasteReasons: data.routeWasteReasons || [],
+      bottleChangeReasons: data.bottleChangeReasons || [],
+      debtReasons: data.debtReasons || [],
+      maquilaBrands: data.maquilaBrands || [], // <--- Aseguramos que siempre exista este campo
       updatedAt: data.updatedAt?.toDate() || new Date(),
     } as SystemSettings;
   },

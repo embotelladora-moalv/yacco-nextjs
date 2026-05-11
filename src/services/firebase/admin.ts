@@ -1,4 +1,3 @@
-// src/services/firebase/admin.ts
 import admin from "firebase-admin";
 import serviceAccount from "../../../serviceAccount.json";
 

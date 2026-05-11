@@ -45,7 +45,7 @@ export default function LoginPage() {
       });
 
       // 4. Redirigimos al Kardex (o al dashboard principal)
-      router.push("/inventory");
+      router.push("/dashboard");
     } catch (error: any) {
       console.error("Error de autenticación:", error);
       toast.error("Error de acceso", {

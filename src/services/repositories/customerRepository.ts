@@ -1,77 +1,44 @@
 import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
-import { CustomerFormValues } from "@/core/validations/customerSchema";
-import { Customer } from "@/core/entities/Customer";
+import { Customer } from "@/core/entities/CRM";
 
-const COLLECTION = "customers";
+const CUSTOMERS_COLLECTION = "customers";
 
 export const customerRepository = {
   /**
-   * Obtiene todos los clientes activos del directorio.
+   * Crea un nuevo cliente. Su cuenta corriente de envases inicia vacía.
    */
-  async getAll(): Promise<Customer[]> {
-    const snapshot = await adminDb
-      .collection(COLLECTION)
-      .where("isActive", "==", true)
-      .get();
-
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        createdAt: data.createdAt?.toDate() || new Date(),
-        updatedAt: data.updatedAt?.toDate() || new Date(),
-        lastSaleDate: data.lastSaleDate?.toDate() || undefined,
-        lastVisitDate: data.lastVisitDate?.toDate() || undefined,
-      } as Customer;
-    });
-  },
-
-  /**
-   * Obtiene un cliente específico por su ID.
-   */
-  async getById(id: string): Promise<Customer | null> {
-    const doc = await adminDb.collection(COLLECTION).doc(id).get();
-    if (!doc.exists) return null;
-
-    const data = doc.data()!;
-    return {
-      id: doc.id,
+  async createCustomer(
+    data: Omit<
+      Customer,
+      "id" | "containerBalances" | "isActive" | "createdAt" | "updatedAt"
+    >,
+  ): Promise<string> {
+    const docRef = await adminDb.collection(CUSTOMERS_COLLECTION).add({
       ...data,
-      createdAt: data.createdAt?.toDate() || new Date(),
-      updatedAt: data.updatedAt?.toDate() || new Date(),
-      lastSaleDate: data.lastSaleDate?.toDate() || undefined,
-      lastVisitDate: data.lastVisitDate?.toDate() || undefined,
-    } as Customer;
-  },
-
-  /**
-   * Crea un nuevo cliente inicializando sus balances financieros en cero.
-   */
-  async create(data: CustomerFormValues): Promise<string> {
-    const ref = adminDb.collection(COLLECTION).doc();
-
-    await ref.set({
-      ...data,
-      // Inicialización financiera (Kardex de cliente)
-      debtAmount: 0,
-      loanedItems: {}, // Sin envases prestados al inicio
-
+      containerBalances: [], // Inicia sin deudas de envases
       isActive: true,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return ref.id;
+    return docRef.id;
   },
 
   /**
-   * Actualiza los datos generales, ubicaciones o contactos del cliente.
+   * Actualiza los datos básicos de un cliente (No toca los balances)
    */
-  async update(id: string, data: Partial<CustomerFormValues>): Promise<void> {
+  async updateCustomer(
+    id: string,
+    data: Partial<
+      Omit<
+        Customer,
+        "id" | "containerBalances" | "isActive" | "createdAt" | "updatedAt"
+      >
+    >,
+  ): Promise<void> {
     await adminDb
-      .collection(COLLECTION)
+      .collection(CUSTOMERS_COLLECTION)
       .doc(id)
       .update({
         ...data,
@@ -80,12 +47,65 @@ export const customerRepository = {
   },
 
   /**
-   * Borrado lógico (Mantiene el historial de facturación intacto).
+   * Cambia el estado activo/inactivo del cliente
    */
-  async deactivate(id: string): Promise<void> {
-    await adminDb.collection(COLLECTION).doc(id).update({
-      isActive: false,
+  async toggleCustomerStatus(id: string, isActive: boolean): Promise<void> {
+    await adminDb.collection(CUSTOMERS_COLLECTION).doc(id).update({
+      isActive,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+  },
+
+  /**
+   * Obtiene la lista completa de clientes con fechas serializadas y validación de nulidad
+   */
+  async getAllCustomers(): Promise<Customer[]> {
+    const snapshot = await adminDb
+      .collection(CUSTOMERS_COLLECTION)
+      .orderBy("createdAt", "desc")
+      .get();
+
+    return snapshot.docs
+      .map((doc) => {
+        const data = doc.data(); // Aquí data podría ser undefined según TS
+
+        // Verificamos que 'data' exista para poder mapear
+        if (!data) return null;
+
+        return {
+          id: doc.id,
+          ...data,
+          containerBalances: data.containerBalances || [],
+          locations: data.locations || [],
+          // Usamos el operador '?.' para proteger la ejecución si el campo no existe
+          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+          lastSaleDate: data.lastSaleDate?.toDate?.()?.toISOString() || null,
+        };
+      })
+      .filter((c): c is any => c !== null); // Filtramos nulos para limpiar el array
+  },
+
+  /**
+   * Obtiene un cliente específico por su ID serializado con protección de datos
+   */
+  async getCustomerById(id: string): Promise<Customer | null> {
+    const doc = await adminDb.collection(CUSTOMERS_COLLECTION).doc(id).get();
+
+    // Validamos primero si el documento existe
+    if (!doc.exists) return null;
+
+    const data = doc.data();
+    if (!data) return null;
+
+    return {
+      id: doc.id,
+      ...data,
+      containerBalances: data.containerBalances || [],
+      locations: data.locations || [],
+      createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+      updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+      lastSaleDate: data.lastSaleDate?.toDate?.()?.toISOString() || null,
+    } as any;
   },
 };

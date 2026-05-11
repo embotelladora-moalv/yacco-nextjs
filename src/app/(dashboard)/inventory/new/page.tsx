@@ -6,7 +6,10 @@ export default async function NewProductPage() {
 
   return (
     <div className="pb-10 pt-6 px-4 sm:px-0">
-      <ProductForm packagingTypes={settings.packagingTypes || []} />
+      <ProductForm
+        packagingTypes={settings.packagingTypes}
+        maquilaBrands={settings.maquilaBrands || []}
+      />{" "}
     </div>
   );
 }
