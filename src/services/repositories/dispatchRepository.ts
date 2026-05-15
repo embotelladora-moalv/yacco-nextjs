@@ -214,6 +214,32 @@ export const dispatchRepository = {
   },
 
   /**
+   * Obtiene los manifiestos que actualmente están en ruta (ON_ROUTE)
+   * Útil para ventas en ruta desde el panel web.
+   */
+  async getActiveManifests(): Promise<DispatchManifest[]> {
+    const snapshot = await adminDb
+      .collection(DISPATCH_COLLECTION)
+      .where("status", "==", "ON_ROUTE")
+      .orderBy("dispatchDate", "desc")
+      .get();
+
+    return snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        items: data.items || data.loadedItems || [], // <-- Salvavidas para datos antiguos
+        dispatchDate: data.dispatchDate?.toDate()?.toISOString(),
+        liquidationDate: data.liquidationDate?.toDate()?.toISOString(),
+        liquidatedAt: data.liquidatedAt?.toDate()?.toISOString(),
+        createdAt: data.createdAt?.toDate()?.toISOString(),
+        updatedAt: data.updatedAt?.toDate()?.toISOString(),
+      } as any;
+    });
+  },
+
+  /**
    * Liquida una ruta detallada (Kardex robusto)
    */
   async liquidateDispatch(

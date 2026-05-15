@@ -6,7 +6,7 @@ export const paymentSchema = z.object({
   date: z.string().min(1, "La fecha es obligatoria"),
   paymentMethod: z.enum(["CASH", "TRANSFER", "CHECK", "OTHER"]),
   reference: z.string().optional(),
-  receivedById: z.string().min(1, "Especifique quién recibe el pago"),
+  receivedById: z.string().optional().or(z.literal("")),
   notes: z.string().optional(),
 });
 

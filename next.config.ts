@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: [
+    "xml-crypto",
+    "xpath",
+    "@xmldom/xmldom",
+    "node-forge",
+  ],
   async redirects() {
     return [
       {

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { saleSchema, SaleFormValues } from "@/core/validations/crmSchemas";
-import { registerSaleAction } from "./actions";
+import { registerSaleAction } from "./actions"; // Asegúrate de que apunte a tu archivo real
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +14,6 @@ import {
   ShoppingCart,
   User,
   Package,
-  DollarSign,
   Plus,
   Trash2,
   Banknote,
@@ -22,24 +21,31 @@ import {
   Save,
   AlertCircle,
   Receipt,
+  Store,
+  Truck,
 } from "lucide-react";
 import { Customer } from "@/core/entities/CRM";
 import { Product } from "@/core/entities/Inventory";
 
 interface SaleFormProps {
-  manifestId: string; // ID de la ruta/camión actual
-  customers: Customer[]; // Lista de clientes para seleccionar
-  products: Product[]; // Catálogo de productos
+  activeManifests: any[]; // <-- NUEVO: Lista de camiones actualmente en ruta
+  customers: Customer[];
+  products: Product[];
 }
 
-export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
+export function SaleForm({
+  activeManifests,
+  customers,
+  products,
+}: SaleFormProps) {
   const [isPending, setIsPending] = useState(false);
   const router = useRouter();
 
   const form = useForm<SaleFormValues>({
     resolver: zodResolver(saleSchema) as any,
     defaultValues: {
-      manifestId: manifestId,
+      saleType: "PLANT", // <-- Por defecto vendemos en Planta
+      manifestId: "",
       customerId: "",
       items: [{ productId: "", quantity: 1, unitPrice: 0 }],
       returnedEmpties: [],
@@ -61,21 +67,16 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
     remove: removeEmpty,
   } = useFieldArray({ control: form.control, name: "returnedEmpties" });
 
-  // ---------------------------------------------------------
-  // CÁLCULOS EN TIEMPO REAL (React Hook Form Watch)
-  // ---------------------------------------------------------
+  const watchSaleType = form.watch("saleType");
   const watchItems = form.watch("items");
   const watchCash = form.watch("cashReceived") || 0;
   const watchDigital = form.watch("digitalReceived") || 0;
   const watchPaymentMethod = form.watch("paymentMethod");
 
-  // Calcular el Total de la Venta
   const totalAmount = watchItems.reduce(
     (sum, item) => sum + Number(item.quantity) * Number(item.unitPrice || 0),
     0,
   );
-
-  // Calcular Total Pagado y Deuda
   const totalPaid =
     watchPaymentMethod === "CREDIT"
       ? 0
@@ -84,8 +85,6 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
 
   const onSubmit = async (values: SaleFormValues) => {
     setIsPending(true);
-
-    // Limpiar arrays (quitar filas vacías si el usuario las dejó a medias)
     const cleanedValues = {
       ...values,
       items: values.items.filter((i) => i.productId && i.quantity > 0),
@@ -107,20 +106,16 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
 
     if (result.success) {
       toast.success("Venta registrada exitosamente");
+      form.reset();
       router.refresh();
-      // Opcional: router.push(`/dispatch/${manifestId}`) para volver al manifiesto
     } else {
       toast.error("Error al guardar", { description: result.error });
     }
   };
 
-  // Helper para autocompletar el precio cuando eligen un producto
   const handleProductSelect = (index: number, productId: string) => {
     const product = products.find((p) => p.id === productId);
-    if (product) {
-      // Asumimos un precio base, en una app real podría venir de una lista de precios
-      form.setValue(`items.${index}.unitPrice`, 10); // Precio default sugerido
-    }
+    if (product) form.setValue(`items.${index}.unitPrice`, 10); // Precio default
   };
 
   return (
@@ -129,43 +124,98 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
         <ShoppingCart className="h-8 w-8 text-emerald-400" />
         <div>
           <h2 className="text-2xl font-black tracking-tight">
-            Registrar Venta
+            Registrar Venta Global
           </h2>
           <p className="text-slate-300 font-medium text-sm mt-0.5">
-            Manifiesto: {manifestId.substring(0, 8).toUpperCase()}
+            Control centralizado (Planta / Ruta)
           </p>
         </div>
       </div>
 
       <form onSubmit={form.handleSubmit(onSubmit)} className="p-6 space-y-8">
-        {/* SECCIÓN 1: CLIENTE */}
-        <div className="space-y-4 bg-slate-50 p-5 rounded-2xl border border-slate-100">
-          <Label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
-            <User className="h-4 w-4 text-blue-600" /> 1. Seleccionar Cliente *
-          </Label>
-          <select
-            {...form.register("customerId")}
-            className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-white font-bold text-slate-800"
+        {/* NUEVO: SELECTOR DE TIPO DE VENTA */}
+        <div className="flex gap-4 p-1 bg-slate-100 rounded-xl w-fit">
+          <button
+            type="button"
+            onClick={() => form.setValue("saleType", "PLANT")}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold transition-all ${
+              watchSaleType === "PLANT"
+                ? "bg-white text-blue-600 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
           >
-            <option value="">Seleccione un cliente de la ruta...</option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} {c.alias ? `(${c.alias})` : ""}
-              </option>
-            ))}
-          </select>
-          {form.formState.errors.customerId && (
-            <p className="text-xs text-red-500 font-bold">
-              {form.formState.errors.customerId.message}
-            </p>
+            <Store className="h-5 w-5" /> Venta en Planta
+          </button>
+          <button
+            type="button"
+            onClick={() => form.setValue("saleType", "ROUTE")}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold transition-all ${
+              watchSaleType === "ROUTE"
+                ? "bg-white text-orange-600 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <Truck className="h-5 w-5" /> Venta por Chofer en Ruta
+          </button>
+        </div>
+
+        {/* SECCIÓN 1: CLIENTE Y RUTA */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 p-5 rounded-2xl border border-slate-100">
+          <div className="space-y-3">
+            <Label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+              <User className="h-4 w-4 text-blue-600" /> Seleccionar Cliente *
+            </Label>
+            <select
+              {...form.register("customerId")}
+              className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-white font-bold text-slate-800"
+            >
+              <option value="">Seleccione un cliente...</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} {c.alias ? `(${c.alias})` : ""}
+                </option>
+              ))}
+            </select>
+            {form.formState.errors.customerId && (
+              <p className="text-xs text-red-500 font-bold">
+                {form.formState.errors.customerId.message}
+              </p>
+            )}
+          </div>
+
+          {/* ESTE SELECT SOLO APARECE SI ELIGE VENTA EN RUTA */}
+          {watchSaleType === "ROUTE" && (
+            <div className="space-y-3">
+              <Label className="text-xs font-black text-orange-600 uppercase tracking-widest flex items-center gap-2">
+                <Truck className="h-4 w-4 text-orange-500" /> Seleccionar Camión
+                *
+              </Label>
+              <select
+                {...form.register("manifestId")}
+                className="w-full h-12 px-4 rounded-xl border border-orange-200 bg-orange-50 font-bold text-orange-900"
+              >
+                <option value="">¿De qué camión se despachó?</option>
+                {activeManifests.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    Ruta: {m.manifestNumber} - Placa: {m.truckPlate}
+                  </option>
+                ))}
+              </select>
+              {form.formState.errors.manifestId && (
+                <p className="text-xs text-red-500 font-bold">
+                  {form.formState.errors.manifestId.message}
+                </p>
+              )}
+            </div>
           )}
         </div>
 
-        {/* SECCIÓN 2: PRODUCTOS ENTREGADOS (LLENOS) */}
+        {/* --- DESDE AQUÍ HACIA ABAJO, TU CÓDIGO ORIGINAL ES PERFECTO --- */}
+        {/* SECCIÓN 2: PRODUCTOS ENTREGADOS */}
         <div className="space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
             <Label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
-              <Package className="h-4 w-4 text-emerald-500" /> 2. Productos
+              <Package className="h-4 w-4 text-emerald-500" /> Productos
               Entregados
             </Label>
             <Button
@@ -206,7 +256,6 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
                     {...form.register(`items.${index}.quantity`)}
                     type="number"
                     min="1"
-                    placeholder="Cant."
                     className="h-10 text-center font-bold"
                   />
                 </div>
@@ -241,19 +290,13 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
               </div>
             ))}
           </div>
-          {form.formState.errors.items &&
-            !Array.isArray(form.formState.errors.items) && (
-              <p className="text-xs text-red-500 font-bold">
-                {form.formState.errors.items.message}
-              </p>
-            )}
         </div>
 
         {/* SECCIÓN 3: ENVASES DEVUELTOS */}
         <div className="space-y-4 bg-orange-50/50 p-5 rounded-2xl border border-orange-100">
           <div className="flex items-center justify-between">
             <Label className="text-xs font-black text-orange-800 uppercase tracking-widest flex items-center gap-2">
-              <AlertCircle className="h-4 w-4" /> 3. Retorno de Envases Vacíos
+              <AlertCircle className="h-4 w-4" /> Retorno de Envases Vacíos
             </Label>
             <Button
               type="button"
@@ -286,7 +329,6 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
                   {...form.register(`returnedEmpties.${index}.quantity`)}
                   type="number"
                   min="1"
-                  placeholder="Cant."
                   className="w-24 h-10 text-center border-orange-200"
                 />
                 <Button
@@ -300,12 +342,6 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
                 </Button>
               </div>
             ))}
-            {emptyFields.length === 0 && (
-              <p className="text-xs text-orange-600/70 italic font-medium">
-                El cliente no devolvió envases en esta venta (Generará deuda de
-                envases).
-              </p>
-            )}
           </div>
         </div>
 
@@ -313,7 +349,7 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
         <div className="border-t border-slate-200 pt-6 grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="space-y-4">
             <Label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
-              <Receipt className="h-4 w-4 text-blue-500" /> 4. Método de Pago
+              <Receipt className="h-4 w-4 text-blue-500" /> Método de Pago
             </Label>
             <select
               {...form.register("paymentMethod")}
@@ -340,11 +376,6 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
                     min="0"
                     className="h-11 font-bold bg-green-50 border-green-200 text-green-800"
                   />
-                  {form.formState.errors.cashReceived && (
-                    <p className="text-[10px] text-red-500 font-bold">
-                      {form.formState.errors.cashReceived.message}
-                    </p>
-                  )}
                 </div>
                 <div
                   className={`space-y-2 ${watchPaymentMethod === "CASH" ? "opacity-50 pointer-events-none" : ""}`}
@@ -383,7 +414,6 @@ export function SaleForm({ manifestId, customers, products }: SaleFormProps) {
                 </span>
               </div>
             </div>
-
             <div className="flex justify-between items-end mt-4">
               <span className="font-black text-slate-300 uppercase tracking-widest text-xs">
                 Deuda Generada

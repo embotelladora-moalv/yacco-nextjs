@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { registerPaymentAction } from "../../actions";
-import { Customer } from "@/core/entities/CRM";
+import { Customer, Sale } from "@/core/entities/CRM";
 import { User } from "@/core/entities/User";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,18 +21,30 @@ import {
   ArrowRight,
   CheckCircle2,
   Save,
+  AlertCircle,
 } from "lucide-react";
 import {
   paymentSchema as debtPaymentSchema,
   PaymentFormValues as DebtPaymentFormValues,
 } from "@/core/validations/paymentSchema";
 
+// Hacemos que el campo receivedById sea opcional a nivel de formulario
+import { z } from "zod";
+const formSchema = debtPaymentSchema.extend({
+  receivedById: z.string().optional(),
+});
+
 interface PaymentFormProps {
   customer: Customer;
-  users: User[]; // Para saber quién registra el cobro
+  users: User[];
+  pendingSales: Sale[]; // <-- Agregado para ver el detalle FIFO
 }
 
-export function PaymentForm({ customer, users }: PaymentFormProps) {
+export function PaymentForm({
+  customer,
+  users,
+  pendingSales,
+}: PaymentFormProps) {
   const [isPending, setIsPending] = useState(false);
   const router = useRouter();
 
@@ -40,14 +52,14 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
   const todayStr = new Date().toISOString().split("T")[0];
 
   const form = useForm<DebtPaymentFormValues>({
-    resolver: zodResolver(debtPaymentSchema) as any,
+    resolver: zodResolver(formSchema) as any,
     defaultValues: {
       customerId: customer.id,
-      amount: currentDebt, // Por defecto sugerimos pagar todo
+      amount: currentDebt, // Sugerimos pagar todo por defecto
       date: todayStr,
       paymentMethod: "TRANSFER",
       reference: "",
-      receivedById: "",
+      receivedById: "", // Puede quedar vacío
       notes: "",
     },
   });
@@ -69,7 +81,7 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
 
     if (result.success) {
       toast.success("Pago registrado exitosamente", {
-        description: `Se descontaron S/ ${values.amount} de la deuda.`,
+        description: `Se descontaron S/ ${values.amount.toFixed(2)} de la deuda mediante FIFO.`,
       });
       router.push("/collections");
       router.refresh();
@@ -79,7 +91,8 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
   };
 
   return (
-    <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden max-w-4xl mx-auto">
+    <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden max-w-6xl mx-auto">
+      {/* HEADER */}
       <div className="bg-slate-900 p-8 text-white flex items-center gap-4">
         <div className="h-14 w-14 rounded-2xl bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30">
           <BadgeDollarSign className="h-7 w-7 text-emerald-400" />
@@ -89,15 +102,16 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
             Registrar Amortización
           </h2>
           <p className="text-emerald-300 font-medium text-sm mt-0.5">
-            Ingreso de dinero y descuento de deuda en cuenta corriente.
+            Ingreso de dinero y descuento de deuda usando conciliación FIFO.
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3">
-        {/* PANEL IZQUIERDO: RESUMEN DEL CLIENTE */}
-        <div className="bg-slate-50 p-8 border-r border-slate-100 flex flex-col justify-between">
-          <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3">
+        {/* PANEL IZQUIERDO: RESUMEN Y DETALLE FIFO */}
+        <div className="bg-slate-50 p-8 border-r border-slate-100 flex flex-col gap-8">
+          {/* 1. Resumen del Cliente */}
+          <div className="space-y-4">
             <div>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
                 Cliente
@@ -110,16 +124,16 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
               </p>
             </div>
 
-            <div className="bg-white p-4 rounded-xl border border-slate-200">
-              <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-1">
-                Deuda Actual
-              </p>
-              <p className="text-3xl font-black text-red-600">
-                S/ {currentDebt.toFixed(2)}
-              </p>
+            <div className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center">
+              <div>
+                <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-1">
+                  Deuda Actual
+                </p>
+                <p className="text-2xl font-black text-red-600">
+                  S/ {currentDebt.toFixed(2)}
+                </p>
+              </div>
             </div>
-
-            <ArrowRight className="h-6 w-6 text-slate-300 mx-auto rotate-90 md:rotate-0" />
 
             <div
               className={`p-4 rounded-xl border transition-colors ${remainingDebt === 0 ? "bg-emerald-50 border-emerald-200" : "bg-orange-50 border-orange-200"}`}
@@ -127,31 +141,74 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
               <p
                 className={`text-[10px] font-black uppercase tracking-widest mb-1 ${remainingDebt === 0 ? "text-emerald-600" : "text-orange-600"}`}
               >
-                Deuda Restante
+                Deuda Post-Pago
               </p>
               <p
-                className={`text-3xl font-black ${remainingDebt === 0 ? "text-emerald-700" : "text-orange-700"}`}
+                className={`text-2xl font-black ${remainingDebt === 0 ? "text-emerald-700" : "text-orange-700"}`}
               >
                 S/ {remainingDebt.toFixed(2)}
               </p>
               {remainingDebt === 0 && (
                 <p className="text-xs font-bold text-emerald-600 mt-2 flex items-center gap-1">
-                  <CheckCircle2 className="h-4 w-4" /> Deuda Saldada
+                  <CheckCircle2 className="h-4 w-4" /> Cuenta Saldada
                 </p>
               )}
             </div>
+          </div>
+
+          <div className="h-px bg-slate-200 w-full" />
+
+          {/* 2. Detalle de Tickets (FIFO) */}
+          <div className="space-y-4">
+            <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+              <FileText className="h-4 w-4" /> Tickets Pendientes (FIFO)
+            </h3>
+
+            {pendingSales.length === 0 ? (
+              <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-xl text-center">
+                <p className="text-xs font-bold text-emerald-600">
+                  No hay tickets pendientes.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                {pendingSales.map((sale) => (
+                  <div
+                    key={sale.id}
+                    className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm"
+                  >
+                    <div className="flex justify-between items-start mb-1">
+                      <span className="text-[10px] font-black bg-slate-100 px-2 py-0.5 rounded text-slate-500">
+                        #{sale.id.substring(0, 8).toUpperCase()}
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-400">
+                        {new Date(sale.createdAt).toLocaleDateString("es-PE")}
+                      </span>
+                    </div>
+                    <p className="text-sm font-bold text-slate-700 mt-1 flex justify-between">
+                      <span>Saldo:</span>
+                      <span className="text-red-500">
+                        S/{" "}
+                        {(sale.remainingBalance ?? sale.totalAmount).toFixed(2)}
+                      </span>
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
         {/* PANEL DERECHO: FORMULARIO */}
         <form
           onSubmit={form.handleSubmit(onSubmit)}
-          className="p-8 md:col-span-2 space-y-6"
+          className="p-8 lg:col-span-2 space-y-8 flex flex-col justify-between"
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <Label className="text-xs font-black text-slate-700 uppercase tracking-widest">
-                Monto a Pagar (S/) *
+            <div className="space-y-2 sm:col-span-2">
+              <Label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                <BadgeDollarSign className="h-4 w-4 text-emerald-500" /> Monto a
+                Pagar (S/) *
               </Label>
               <Input
                 {...form.register("amount")}
@@ -159,7 +216,7 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
                 step="0.10"
                 min="0.1"
                 max={currentDebt}
-                className="h-14 text-2xl font-black text-emerald-600 border-2 border-emerald-100 bg-emerald-50/30 focus:border-emerald-500"
+                className="h-16 text-3xl font-black text-emerald-600 border-2 border-emerald-100 bg-emerald-50/50 focus:border-emerald-500"
               />
               {form.formState.errors.amount && (
                 <p className="text-xs text-red-500 font-bold">
@@ -175,7 +232,7 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
               <Input
                 {...form.register("date")}
                 type="date"
-                className="h-14 border-slate-200 font-bold text-slate-700"
+                className="h-12 border-slate-200 font-bold text-slate-700"
               />
             </div>
 
@@ -185,7 +242,7 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
               </Label>
               <select
                 {...form.register("paymentMethod")}
-                className="w-full h-14 px-4 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white"
+                className="w-full h-12 px-4 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white"
               >
                 <option value="TRANSFER">Transferencia / Yape / Plin</option>
                 <option value="CASH">Efectivo Físico</option>
@@ -196,37 +253,35 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
 
             <div className="space-y-2">
               <Label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
-                <FileText className="h-4 w-4 text-slate-400" /> Nº Operación /
-                Referencia
+                <FileText className="h-4 w-4 text-slate-400" /> Nº Ref. /
+                Operación
               </Label>
               <Input
                 {...form.register("reference")}
                 placeholder="Ej: 00123994"
-                className="h-14 border-slate-200 font-medium"
+                className="h-12 border-slate-200 font-medium"
               />
             </div>
 
-            <div className="space-y-2 sm:col-span-2">
+            <div className="space-y-2">
               <Label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
-                <UserIcon className="h-4 w-4 text-purple-500" /> Cajero /
-                Recibido Por *
+                <UserIcon className="h-4 w-4 text-purple-500" /> Recibido Por
+                (Opcional)
               </Label>
               <select
                 {...form.register("receivedById")}
-                className="w-full h-14 px-4 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white"
+                className="w-full h-12 px-4 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white"
               >
-                <option value="">-- Seleccione quién recibe --</option>
+                <option value="">-- Pago Directo / Sin Cajero --</option>
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
                   </option>
                 ))}
               </select>
-              {form.formState.errors.receivedById && (
-                <p className="text-xs text-red-500 font-bold">
-                  {form.formState.errors.receivedById.message}
-                </p>
-              )}
+              <p className="text-[10px] text-slate-400 italic">
+                Si el admin recibió directo por Yape, dejar vacío.
+              </p>
             </div>
 
             <div className="space-y-2 sm:col-span-2">
@@ -235,31 +290,31 @@ export function PaymentForm({ customer, users }: PaymentFormProps) {
               </Label>
               <Input
                 {...form.register("notes")}
-                placeholder="Ej: Pago parcial correspondiente a la factura F001..."
+                placeholder="Ej: Abono Yape a la cuenta de la empresa..."
                 className="h-12 border-slate-200"
               />
             </div>
           </div>
 
-          <div className="pt-6 border-t border-slate-100 flex justify-end gap-3">
+          <div className="pt-8 border-t border-slate-100 flex justify-end gap-4 mt-auto">
             <Button
               type="button"
               variant="ghost"
               onClick={() => router.back()}
-              className="font-bold text-slate-500 h-12"
+              className="font-bold text-slate-500 h-14 px-6 rounded-xl"
             >
               Cancelar
             </Button>
             <Button
               type="submit"
               disabled={isPending}
-              className="bg-slate-900 hover:bg-slate-800 text-white font-black px-10 shadow-lg shadow-slate-900/20 h-12 rounded-xl"
+              className="bg-slate-900 hover:bg-slate-800 text-white font-black px-10 shadow-lg shadow-slate-900/20 h-14 rounded-xl"
             >
               {isPending ? (
                 "Registrando..."
               ) : (
                 <>
-                  <Save className="mr-2 h-5 w-5" /> Confirmar Pago
+                  <Save className="mr-2 h-5 w-5" /> Aplicar Abono (FIFO)
                 </>
               )}
             </Button>

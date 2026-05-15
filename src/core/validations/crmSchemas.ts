@@ -48,27 +48,58 @@ export const saleEmptyReturnSchema = z.object({
 
 export const saleSchema = z
   .object({
-    manifestId: z.string().min(1, "Debe pertenecer a una ruta activa"),
+    saleType: z.enum(["PLANT", "ROUTE"]), // <-- NUEVO CAMPO
+    manifestId: z.string().optional(), // <-- AHORA ES OPCIONAL
     customerId: z.string().min(1, "Debe seleccionar un cliente"),
+
     items: z
-      .array(saleItemSchema)
-      .min(1, "La venta debe tener al menos un producto"),
-    returnedEmpties: z.array(saleEmptyReturnSchema).default([]),
+      .array(
+        z.object({
+          productId: z.string().min(1, "Seleccione un producto"),
+          quantity: z.coerce.number().min(1, "Mínimo 1 unidad"),
+          unitPrice: z.coerce.number().min(0, "Precio inválido"),
+        }),
+      )
+      .min(1, "Agregue al menos un producto a la venta"),
+
+    returnedEmpties: z
+      .array(
+        z.object({
+          productId: z.string(),
+          quantity: z.coerce.number().min(1),
+        }),
+      )
+      .default([]),
+
     paymentMethod: z.enum(["CASH", "DIGITAL", "CREDIT", "MIXED"]),
-    cashReceived: z.coerce.number().min(0).default(0),
-    digitalReceived: z.coerce.number().min(0).default(0),
+    cashReceived: z.coerce.number().default(0),
+    digitalReceived: z.coerce.number().default(0),
     notes: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    const total = data.items.reduce(
-      (acc, item) => acc + item.quantity * item.unitPrice,
-      0,
-    );
-    const paid = data.cashReceived + data.digitalReceived;
-    if (data.paymentMethod !== "CREDIT" && paid < total) {
+    // 1. Validar que la venta en ruta tenga un camión asignado
+    if (
+      data.saleType === "ROUTE" &&
+      (!data.manifestId || data.manifestId.trim() === "")
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `El pago (S/ ${paid}) es menor al total de la venta (S/ ${total}). Marque como CRÉDITO si el cliente dejará deuda.`,
+        message: "Debe seleccionar el camión/manifiesto en ruta",
+        path: ["manifestId"],
+      });
+    }
+
+    // 2. Validar que los pagos coincidan con el total (si no es crédito)
+    const totalAmount = data.items.reduce(
+      (sum, item) => sum + item.quantity * item.unitPrice,
+      0,
+    );
+    const totalReceived = data.cashReceived + data.digitalReceived;
+
+    if (data.paymentMethod !== "CREDIT" && totalReceived < totalAmount) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El monto recibido no cubre el total de la venta",
         path: ["cashReceived"],
       });
     }

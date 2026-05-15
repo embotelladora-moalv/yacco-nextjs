@@ -56,6 +56,7 @@ export interface Sale {
   id: string;
   manifestId: string;
   driverId: string;
+  registeredBy?: string;
   customerId: string;
   items: SaleItem[];
   returnedEmpties: SaleEmptyReturn[];
@@ -65,6 +66,26 @@ export interface Sale {
   digitalReceived: number;
   notes?: string;
   status: "COMPLETED" | "CANCELLED";
+  paymentStatus: "UNPAID" | "PARTIAL" | "PAID"; // <-- NUEVO
+  remainingBalance: number;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface DebtPayment {
+  id: string;
+  customerId: string;
+  amount: number;
+  date: string;
+  paymentMethod: string;
+  appliedTo: {
+    // Detalle de la distribución FIFO
+    saleId: string;
+    amountApplied: number;
+  }[];
+  status: "ACTIVE" | "CANCELLED"; // Para soportar anulaciones
+  receivedById: string;
+  reference?: string;
+  notes?: string;
+  createdAt: any;
 }
