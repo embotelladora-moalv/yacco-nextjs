@@ -1,16 +1,20 @@
+// src/core/validations/crmSchemas.ts
 import { z } from "zod";
 
 export const customerLocationSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(2, "Asigne un nombre (Ej: Principal)"),
-  address: z.string().min(5, "La dirección es obligatoria"),
+  address: z.string().nullish(),
   reference: z.string().optional(),
   contactName: z.string().optional(),
   contactPhone: z.string().optional(),
   isMain: z.boolean().default(false),
+  ubigeo: z.string().max(6).optional().or(z.literal("")),
+  imageUrl: z.string().optional(),
+
   coordinates: z
     .object({
-      lat: z.coerce.number(), // coerce.number para aceptar texto del input y pasarlo a número
+      lat: z.coerce.number(),
       lng: z.coerce.number(),
     })
     .optional(),
@@ -22,9 +26,23 @@ export const customerSchema = z.object({
   documentType: z.enum(["DNI", "RUC", "OTHER"]),
   documentNumber: z.string().min(8, "Documento inválido"),
 
-  // NUEVOS CAMPOS ZOD
   contactName: z.string().optional(),
   contactPhone: z.string().optional(),
+
+  alwaysRequiresBilling: z.boolean().default(false),
+
+  customPrices: z
+    .array(
+      z.object({
+        productId: z.string(),
+        productName: z.string(),
+        refillPrice: z.coerce.number().min(0).optional(),
+        fullPrice: z.coerce.number().min(0).optional(),
+        bottlePrice: z.coerce.number().min(0).optional(),
+      }),
+    )
+    .optional()
+    .default([]),
 
   tags: z.array(z.string()).default([]),
   locations: z
@@ -34,11 +52,14 @@ export const customerSchema = z.object({
 
 export type CustomerFormValues = z.infer<typeof customerSchema>;
 
-// ... (El resto de los esquemas de ventas quedan igual)
 export const saleItemSchema = z.object({
-  productId: z.string(),
+  productId: z.string().min(1, "Seleccione un producto"),
   quantity: z.coerce.number().min(1, "Debe vender al menos 1"),
   unitPrice: z.coerce.number().min(0),
+  description: z.string().optional(),
+  itemSaleType: z
+    .enum(["REFILL", "FULL", "BOTTLE", "STANDARD"])
+    .default("STANDARD"),
 });
 
 export const saleEmptyReturnSchema = z.object({
@@ -48,28 +69,19 @@ export const saleEmptyReturnSchema = z.object({
 
 export const saleSchema = z
   .object({
-    saleType: z.enum(["PLANT", "ROUTE"]), // <-- NUEVO CAMPO
-    manifestId: z.string().optional(), // <-- AHORA ES OPCIONAL
+    saleType: z.enum(["PLANT", "ROUTE"]),
+    manifestId: z.string().optional(),
     customerId: z.string().min(1, "Debe seleccionar un cliente"),
 
+    // 🔥 NUEVOS CAMPOS PARA SUNAT
+    requiresBilling: z.boolean().default(false), // Generar Boleta/Factura
+    requiresGuide: z.boolean().default(false),
+
     items: z
-      .array(
-        z.object({
-          productId: z.string().min(1, "Seleccione un producto"),
-          quantity: z.coerce.number().min(1, "Mínimo 1 unidad"),
-          unitPrice: z.coerce.number().min(0, "Precio inválido"),
-        }),
-      )
+      .array(saleItemSchema)
       .min(1, "Agregue al menos un producto a la venta"),
 
-    returnedEmpties: z
-      .array(
-        z.object({
-          productId: z.string(),
-          quantity: z.coerce.number().min(1),
-        }),
-      )
-      .default([]),
+    returnedEmpties: z.array(saleEmptyReturnSchema).default([]),
 
     paymentMethod: z.enum(["CASH", "DIGITAL", "CREDIT", "MIXED"]),
     cashReceived: z.coerce.number().default(0),
@@ -77,7 +89,6 @@ export const saleSchema = z
     notes: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    // 1. Validar que la venta en ruta tenga un camión asignado
     if (
       data.saleType === "ROUTE" &&
       (!data.manifestId || data.manifestId.trim() === "")
@@ -89,17 +100,29 @@ export const saleSchema = z
       });
     }
 
-    // 2. Validar que los pagos coincidan con el total (si no es crédito)
-    const totalAmount = data.items.reduce(
-      (sum, item) => sum + item.quantity * item.unitPrice,
-      0,
-    );
     const totalReceived = data.cashReceived + data.digitalReceived;
 
-    if (data.paymentMethod !== "CREDIT" && totalReceived < totalAmount) {
+    // 🔥 MODIFICADO: Ahora permite pagos parciales (menores al total), pero prohíbe estrictamente el valor 0
+    if (data.paymentMethod === "CASH" && data.cashReceived <= 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "El monto recibido no cubre el total de la venta",
+        message: "El monto en efectivo debe ser mayor a 0",
+        path: ["cashReceived"],
+      });
+    }
+
+    if (data.paymentMethod === "DIGITAL" && data.digitalReceived <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El monto digital debe ser mayor a 0",
+        path: ["digitalReceived"],
+      });
+    }
+
+    if (data.paymentMethod === "MIXED" && totalReceived <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El total recibido en método mixto debe ser mayor a 0",
         path: ["cashReceived"],
       });
     }

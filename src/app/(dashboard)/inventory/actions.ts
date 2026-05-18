@@ -31,8 +31,6 @@ export async function saveProductAction(data: ProductFormValues, id?: string) {
   }
 }
 
-// ... (tu código anterior de saveProductAction)
-
 export async function registerPurchaseAction(
   productId: string,
   quantity: number,

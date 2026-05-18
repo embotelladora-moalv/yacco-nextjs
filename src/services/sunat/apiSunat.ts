@@ -54,24 +54,32 @@ export async function sendInvoiceToSunat(fileName: string, signedXml: string) {
 
   const responseText = await response.text();
 
+  // Imprimimos la respuesta cruda en consola para depuración
+  console.log("Respuesta cruda de SUNAT:", responseText);
+
   // 4. Analizar la respuesta de SUNAT
-  if (!response.ok) {
-    // Si hay un error HTTP o SOAP Fault (Ej. XML mal formado o credenciales inválidas)
-    const faultCodeMatch = responseText.match(/<faultcode>(.*?)<\/faultcode>/);
+  // SUNAT a veces devuelve HTTP 200 OK pero con un SOAP Fault oculto por dentro
+  if (!response.ok || responseText.includes("faultcode")) {
+    const faultCodeMatch = responseText.match(
+      /<faultcode[^>]*>(.*?)<\/faultcode>/,
+    );
     const faultStringMatch = responseText.match(
-      /<faultstring>(.*?)<\/faultstring>/,
+      /<faultstring[^>]*>(.*?)<\/faultstring>/,
     );
     throw new Error(
-      `Rechazo de SUNAT: ${faultCodeMatch?.[1]} - ${faultStringMatch?.[1]}`,
+      `Rechazo de SUNAT: ${faultCodeMatch?.[1]?.replace("soap-env:", "")} - ${faultStringMatch?.[1]}`,
     );
   }
 
   // 5. Extraer el CDR (El ZIP de respuesta de SUNAT en Base64)
   const cdrMatch = responseText.match(
-    /<applicationResponse>(.*?)<\/applicationResponse>/,
+    /<[^>]*applicationResponse[^>]*>([\s\S]*?)<\/[^>]*applicationResponse>/i,
   );
+
   if (!cdrMatch || !cdrMatch[1]) {
-    throw new Error("La SUNAT no devolvió la constancia de recepción (CDR)");
+    throw new Error(
+      `La SUNAT no devolvió la constancia de recepción (CDR). Respuesta del servidor: ${responseText.substring(0, 500)}...`,
+    );
   }
 
   // Retornamos el ZIP Base64 para que luego lo subas a Firebase Storage

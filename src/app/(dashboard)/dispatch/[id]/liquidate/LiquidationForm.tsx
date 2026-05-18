@@ -21,6 +21,11 @@ import {
   DollarSign,
   ArrowDownToLine,
   ShoppingCart,
+  Wallet,
+  AlertTriangle,
+  History,
+  Clock,
+  Trash2,
 } from "lucide-react";
 
 interface LiquidationFormProps {
@@ -38,10 +43,46 @@ export function LiquidationForm({
   const router = useRouter();
 
   const returnableProducts = products.filter((p) => p.isReturnableContainer);
+  const pitStopsHistory = manifest.pitStopsHistory || [];
 
-  // =========================================================================
-  // 1. INTELIGENCIA: CALCULAR SUGERENCIA DE LLENOS QUE REGRESAN
-  // =========================================================================
+  const initialPettyCash = Number(manifest.initialPettyCash) || 0;
+  const accumulatedAdditionalCash = Number(manifest.additionalPettyCash) || 0;
+  const totalCashFromSales = sales
+    .filter((s) => s.paymentMethod === "CASH" || s.paymentMethod === "MIXED")
+    .reduce((sum, s) => sum + (Number(s.cashReceived) || 0), 0);
+  const cashAlreadyHandedOver = Number(manifest.cashAdvances) || 0;
+
+  const expectedCashOnHand =
+    initialPettyCash +
+    accumulatedAdditionalCash +
+    totalCashFromSales -
+    cashAlreadyHandedOver;
+
+  const safeItems = manifest.items || [];
+  const fullsOnBoard = safeItems.reduce((acc: any, item: any) => {
+    if (!acc[item.productId])
+      acc[item.productId] = {
+        total: 0,
+        product: products.find((p) => p.id === item.productId),
+      };
+    acc[item.productId].total +=
+      (item.quantityLoaded || 0) -
+      (item.quantityReturnedFull || 0) -
+      (item.wasteQuantity || 0);
+    return acc;
+  }, {});
+
+  sales.forEach((sale) => {
+    (sale.items || []).forEach((item: any) => {
+      if (item.itemSaleType !== "BOTTLE" && fullsOnBoard[item.productId]) {
+        fullsOnBoard[item.productId].total -= item.quantity;
+      }
+    });
+  });
+  const activeFulls = Object.values(fullsOnBoard).filter(
+    (g: any) => g.total > 0,
+  );
+
   const suggestedItems = useMemo(() => {
     const soldByProduct = sales.reduce((acc: any, sale: any) => {
       (sale.items || []).forEach((item: any) => {
@@ -50,10 +91,9 @@ export function LiquidationForm({
       });
       return acc;
     }, {});
-
     const remainingSold = { ...soldByProduct };
 
-    return (manifest.items || []).map((item: any) => {
+    return safeItems.map((item: any) => {
       let soldFromThisLot = 0;
       if (remainingSold[item.productId] > 0) {
         soldFromThisLot = Math.min(
@@ -62,9 +102,11 @@ export function LiquidationForm({
         );
         remainingSold[item.productId] -= soldFromThisLot;
       }
-
-      const expectedReturn = item.quantityLoaded - soldFromThisLot;
-
+      const expectedReturn =
+        item.quantityLoaded -
+        soldFromThisLot -
+        (item.quantityReturnedFull || 0) -
+        (item.wasteQuantity || 0);
       return {
         productId: item.productId,
         lotNumber: item.lotNumber || "GENERIC",
@@ -74,46 +116,39 @@ export function LiquidationForm({
         _soldCalculated: soldFromThisLot,
       };
     });
-  }, [manifest.items, sales]);
+  }, [safeItems, sales]);
 
-  // =========================================================================
-  // 2. INTELIGENCIA: CALCULAR SUGERENCIA DE ENVASES VACÍOS
-  // =========================================================================
   const suggestedEmpties = useMemo(() => {
     const emptiesCount: Record<string, number> = {};
 
     sales.forEach((sale: any) => {
-      (sale.items || []).forEach((item: any) => {
-        // Solo exigimos envase si el producto vendido está marcado como retornable
-        const isReturnable = returnableProducts.some(
-          (p) => p.id === item.productId,
-        );
-        if (isReturnable) {
-          if (!emptiesCount[item.productId]) emptiesCount[item.productId] = 0;
-          emptiesCount[item.productId] += item.quantity || 0;
-        }
+      (sale.returnedEmpties || []).forEach((e: any) => {
+        if (!emptiesCount[e.productId]) emptiesCount[e.productId] = 0;
+        emptiesCount[e.productId] += e.quantity || 0;
       });
     });
 
-    const result = Object.keys(emptiesCount).map((productId) => ({
-      productId,
-      quantityReturned: emptiesCount[productId],
-    }));
+    (manifest.returnedEmpties || []).forEach((e: any) => {
+      if (emptiesCount[e.productId] !== undefined) {
+        emptiesCount[e.productId] -= e.quantityReturned || e.quantity || 0;
+      }
+    });
 
-    // Si no vendió nada retornable, dejamos 1 fila vacía para que el UI se vea bien
-    return result.length > 0
-      ? result
-      : [{ productId: "", quantityReturned: 0 }];
-  }, [sales, returnableProducts]);
+    const result = Object.keys(emptiesCount)
+      .filter((id) => emptiesCount[id] > 0)
+      .map((productId) => ({
+        productId,
+        quantityReturned: emptiesCount[productId],
+      }));
 
-  // =========================================================================
-  // INICIALIZACIÓN DEL FORMULARIO CON AMBAS SUGERENCIAS
-  // =========================================================================
+    return result.length > 0 ? result : [];
+  }, [sales, manifest.returnedEmpties]);
+
   const form = useForm<LiquidationManifestFormValues>({
     resolver: zodResolver(liquidationManifestSchema) as any,
     defaultValues: {
       items: suggestedItems,
-      returnedEmpties: suggestedEmpties, // <-- AQUÍ SE PRECARGAN LOS VACÍOS ESPERADOS
+      returnedEmpties: suggestedEmpties,
       cashReported: 0,
       digitalPaymentsReported: 0,
       notes: "",
@@ -124,11 +159,7 @@ export function LiquidationForm({
     fields: emptyFields,
     append: appendEmpty,
     remove: removeEmpty,
-  } = useFieldArray({
-    control: form.control,
-    name: "returnedEmpties",
-  });
-
+  } = useFieldArray({ control: form.control, name: "returnedEmpties" });
   const getProductName = (id: string) =>
     products.find((p) => p.id === id)?.name || "Producto desconocido";
   const getProductSku = (id: string) =>
@@ -141,7 +172,6 @@ export function LiquidationForm({
         (e) => e.productId !== "" && e.quantityReturned > 0,
       ),
     };
-
     setIsPending(true);
     const result = await liquidateDispatchAction(manifest.id, cleanedValues);
     setIsPending(false);
@@ -156,29 +186,115 @@ export function LiquidationForm({
   };
 
   return (
-    <div className="bg-white rounded-3xl border shadow-sm overflow-hidden max-w-5xl mx-auto">
-      <div className="bg-slate-900 p-8 text-white flex items-center justify-between gap-4">
+    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden max-w-5xl mx-auto">
+      <div className="bg-slate-900 p-8 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex items-center gap-4">
-          <CheckCircle2 className="h-10 w-10 text-green-400" />
+          <CheckCircle2 className="h-10 w-10 text-emerald-400" />
           <div>
             <h2 className="text-2xl font-black tracking-tight">
-              Liquidar Ruta: {manifest.manifestNumber}
+              Cierre y Liquidación
             </h2>
             <p className="text-slate-300 font-medium text-sm mt-0.5">
-              Placa: {manifest.truckPlate}
+              Manifiesto: {manifest.manifestNumber} | Placa:{" "}
+              {manifest.truckPlate}
             </p>
           </div>
         </div>
       </div>
 
+      <div className="bg-slate-900 px-8 pb-8 pt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700 flex flex-col justify-between">
+          <div className="flex justify-between items-center mb-3">
+            <h4 className="text-xs font-black uppercase tracking-widest text-emerald-400 flex items-center gap-2">
+              <Wallet className="h-4 w-4" /> Efectivo Final a Rendir
+            </h4>
+          </div>
+          <div>
+            <p className="text-slate-400 text-xs font-medium">
+              Según sistema el chofer debe entregar:
+            </p>
+            <p className="text-3xl font-black text-white mt-1">
+              S/ {expectedCashOnHand.toFixed(2)}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700 overflow-y-auto max-h-40">
+          <h4 className="text-xs font-black uppercase tracking-widest text-orange-400 flex items-center gap-2 mb-3">
+            <AlertTriangle className="h-4 w-4" /> Llenos Remanentes a Bordo
+          </h4>
+          <div className="space-y-2">
+            {activeFulls.length === 0 ? (
+              <p className="text-xs text-slate-500 font-medium">
+                El camión ya no tiene bidones llenos.
+              </p>
+            ) : (
+              activeFulls.map((g: any) => (
+                <div
+                  key={g.product?.id}
+                  className="flex justify-between items-center border-b border-slate-700/50 pb-1"
+                >
+                  <span className="text-xs font-bold text-slate-300">
+                    {g.product?.name}
+                  </span>
+                  <span className="text-sm font-black text-orange-400">
+                    {g.total} u.
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
       <form onSubmit={form.handleSubmit(onSubmit)} className="p-8 space-y-10">
-        {/* SECCIÓN 1: RETORNO DE LLENOS */}
+        {pitStopsHistory.length > 0 && (
+          <div className="bg-orange-50 p-5 rounded-2xl border border-orange-100">
+            <h3 className="text-sm font-black tracking-widest text-orange-800 uppercase flex items-center gap-2 mb-4">
+              <History className="h-5 w-5 text-orange-500" /> Paradas Previas
+              Registradas Hoy ({pitStopsHistory.length})
+            </h3>
+            <div className="space-y-3">
+              {pitStopsHistory.map((pit: any, idx: number) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between bg-white p-3 rounded-xl border border-orange-100 text-xs"
+                >
+                  <div className="flex items-center gap-2 text-slate-600 font-bold">
+                    <Clock className="h-4 w-4 text-slate-400" />
+                    {/* 🔥 CORRECCIÓN FECHA Y HORA */}
+                    {new Date(pit.createdAt).toLocaleString("es-PE", {
+                      day: "2-digit",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: true,
+                    })}
+                  </div>
+                  <div className="flex gap-4">
+                    <span className="text-emerald-600 font-bold">
+                      Rindió: S/ {pit.cashHandover || 0}
+                    </span>
+                    <span className="text-blue-600 font-bold">
+                      Bajó Vacíos:{" "}
+                      {pit.returnedEmpties?.reduce(
+                        (s: number, e: any) => s + e.quantity,
+                        0,
+                      ) || 0}
+                      u.
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="space-y-4">
           <h3 className="text-base font-black tracking-widest text-slate-800 uppercase flex items-center gap-2 border-b pb-2">
-            <Package className="h-5 w-5 text-blue-600" /> 1. Cuadre de Llenos
-            (Sugerido por sistema)
+            <Package className="h-5 w-5 text-blue-600" /> 1. Cuadre Final de
+            Llenos y Mermas
           </h3>
-
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full text-sm text-left">
               <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs">
@@ -190,7 +306,7 @@ export function LiquidationForm({
                     Vendido
                   </th>
                   <th className="px-4 py-3 text-center bg-blue-50 text-blue-700">
-                    Regresa (Llenos)
+                    Regresa Lleno
                   </th>
                   <th className="px-4 py-3 text-center bg-red-50 text-red-700">
                     Merma (Rotos)
@@ -268,13 +384,18 @@ export function LiquidationForm({
           </div>
         </div>
 
-        {/* SECCIÓN 2: RETORNO DE ENVASES VACÍOS */}
         <div className="space-y-4">
           <div className="flex items-center justify-between border-b pb-2">
-            <h3 className="text-base font-black tracking-widest text-slate-800 uppercase flex items-center gap-2">
-              <ArrowDownToLine className="h-5 w-5 text-green-600" /> 2. Envases
-              Vacíos Recolectados
-            </h3>
+            <div>
+              <h3 className="text-base font-black tracking-widest text-slate-800 uppercase flex items-center gap-2">
+                <ArrowDownToLine className="h-5 w-5 text-green-600" /> 2. Vacíos
+                Físicos Entregados AHORA
+              </h3>
+              <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase">
+                Sugerencia calculada descontando los vacíos ya entregados en Pit
+                Stops.
+              </p>
+            </div>
             <Button
               type="button"
               variant="outline"
@@ -284,11 +405,16 @@ export function LiquidationForm({
               }
               className="font-bold text-green-700 border-green-200 hover:bg-green-50"
             >
-              Agregar Envase Adicional
+              Agregar Envase
             </Button>
           </div>
 
           <div className="grid gap-3">
+            {emptyFields.length === 0 && (
+              <p className="text-xs text-slate-500 font-medium bg-slate-50 p-4 rounded-xl text-center">
+                No hay envases pendientes de entregar.
+              </p>
+            )}
             {emptyFields.map((field, index) => (
               <div
                 key={field.id}
@@ -325,26 +451,19 @@ export function LiquidationForm({
                     className="h-11 font-black text-center text-green-700 border-green-200 bg-white"
                   />
                 </div>
-                {emptyFields.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => removeEmpty(index)}
-                    className="mt-5 text-red-500 hover:bg-red-50"
-                  >
-                    Remover
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => removeEmpty(index)}
+                  className="mt-5 text-red-500 hover:bg-red-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </div>
             ))}
           </div>
-          <p className="text-xs font-bold text-green-600">
-            * El sistema ha sugerido la cantidad de envases en base a las ventas
-            registradas. Ajuste si hay diferencias.
-          </p>
         </div>
 
-        {/* SECCIÓN 3: CAJA Y FINANZAS */}
         <div className="space-y-4">
           <h3 className="text-base font-black tracking-widest text-slate-800 uppercase flex items-center gap-2 border-b pb-2">
             <DollarSign className="h-5 w-5 text-orange-500" /> 3. Cuadre de Caja
@@ -400,7 +519,7 @@ export function LiquidationForm({
           <Button
             type="submit"
             disabled={isPending}
-            className="bg-slate-900 hover:bg-slate-800 text-white font-black px-10"
+            className="bg-slate-900 hover:bg-slate-800 text-white font-black px-10 h-12"
           >
             {isPending ? (
               "Procesando..."

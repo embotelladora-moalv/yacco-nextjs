@@ -5,15 +5,36 @@ import { SaleFormValues } from "@/core/validations/crmSchemas";
 import { adminDb } from "@/services/firebase/admin";
 import { PaymentFormValues } from "@/core/validations/paymentSchema";
 
+export function serializeFirestoreData(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== "object") return obj;
+
+  // Si es un Timestamp de Firebase (tiene la función toDate)
+  if (typeof obj.toDate === "function") {
+    return obj.toDate().toISOString();
+  }
+
+  // Si es un Array, iteramos
+  if (Array.isArray(obj)) {
+    return obj.map((item) => serializeFirestoreData(item));
+  }
+
+  // Si es un objeto regular, iteramos sus llaves
+  const serialized: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    serialized[key] = serializeFirestoreData(value);
+  }
+  return serialized;
+}
+
 const SALES_COLLECTION = "sales";
 const CUSTOMERS_COLLECTION = "customers";
 const DISPATCH_COLLECTION = "dispatchManifests";
-const PRODUCTS_COLLECTION = "products"; // <-- Nueva constante para Planta
+const PRODUCTS_COLLECTION = "products";
 
 export const salesRepository = {
   /**
    * Registra una venta atómica.
-   * Dependiendo del saleType ("PLANT" o "ROUTE") actualizará el almacén central o la tolva del camión.
    */
   async registerSale(
     data: SaleFormValues,
@@ -27,7 +48,6 @@ export const salesRepository = {
         .doc(data.customerId);
       const newSaleRef = adminDb.collection(SALES_COLLECTION).doc();
 
-      // Referencia del Manifiesto (Solo si es venta en Ruta)
       let manifestRef;
       if (data.saleType === "ROUTE" && data.manifestId) {
         manifestRef = adminDb
@@ -60,12 +80,10 @@ export const salesRepository = {
       const balanceMap = new Map<string, number>();
 
       currentBalances.forEach((b) => balanceMap.set(b.productId, b.balance));
-      // Sumar deuda por los bidones llenos entregados
       data.items.forEach((item) => {
         const current = balanceMap.get(item.productId) || 0;
         balanceMap.set(item.productId, current + item.quantity);
       });
-      // Restar deuda por los vacíos devueltos
       data.returnedEmpties.forEach((empty) => {
         const current = balanceMap.get(empty.productId) || 0;
         balanceMap.set(empty.productId, current - empty.quantity);
@@ -82,7 +100,6 @@ export const salesRepository = {
       );
       const totalPaid = data.cashReceived + data.digitalReceived;
 
-      // Deuda que genera ESTA venta específica
       const newMoneyDebt =
         data.paymentMethod === "CREDIT"
           ? totalAmount
@@ -91,7 +108,6 @@ export const salesRepository = {
       const currentMoneyDebt = customer.debtAmount || 0;
       const updatedMoneyDebt = currentMoneyDebt + newMoneyDebt;
 
-      // 4.5 Determinar el estado FIFO de este nuevo ticket
       const remainingBalance = newMoneyDebt;
       let paymentStatus: "UNPAID" | "PARTIAL" | "PAID" = "UNPAID";
 
@@ -104,7 +120,7 @@ export const salesRepository = {
       }
 
       // 5. Estructurar el documento de Venta (El Ticket)
-      const saleDoc: Sale = {
+      const saleDoc: any = {
         id: newSaleRef.id,
         manifestId:
           data.saleType === "PLANT" ? "PLANT_SALE" : data.manifestId || "",
@@ -124,18 +140,21 @@ export const salesRepository = {
         digitalReceived: data.digitalReceived,
         notes: data.notes,
         status: "COMPLETED",
-        paymentStatus: paymentStatus, // <--- NUEVO CAMPO AÑADIDO
-        remainingBalance: remainingBalance, // <--- NUEVO CAMPO AÑADIDO
+        paymentStatus: paymentStatus,
+        remainingBalance: remainingBalance,
+
+        // 🔥 CORRECCIÓN CRÍTICA: Guardamos correctamente los flags de SUNAT
+        isBilled: false,
+        sunatDocumentId: null,
+        billingSkipped: data.requiresBilling === false, // Si no pide factura, se salta la facturación
+
         createdAt: admin.firestore.FieldValue.serverTimestamp() as any,
         updatedAt: admin.firestore.FieldValue.serverTimestamp() as any,
       };
 
-      // 6. ESCRITURAS SIMULTÁNEAS (Si una falla, todo se revierte)
-
-      // A) Guardar el Ticket de Venta
+      // 6. ESCRITURAS SIMULTÁNEAS
       transaction.set(newSaleRef, saleDoc);
 
-      // B) Actualizar Cliente (Deudas de envases, deudas de dinero y última compra)
       transaction.update(customerRef, {
         containerBalances: newContainerBalances,
         debtAmount: updatedMoneyDebt,
@@ -145,7 +164,7 @@ export const salesRepository = {
 
       // C) ACTUALIZAR INVENTARIOS SEGÚN EL TIPO DE VENTA
       if (data.saleType === "ROUTE" && manifestRef && manifest) {
-        // VENTA EN RUTA: Actualizar el camión
+        // VENTA EN RUTA: Actualizar los Llenos vendidos en el camión
         const updatedItems = (manifest.items || []).map((mItem: any) => {
           const soldItem = data.items.find(
             (i) => i.productId === mItem.productId,
@@ -159,28 +178,21 @@ export const salesRepository = {
           return mItem;
         });
 
-        const updatedEmpties = [...(manifest.emptiesReturned || [])];
-        data.returnedEmpties.forEach((empty) => {
-          const existing = updatedEmpties.find(
-            (e: any) => e.productId === empty.productId,
-          );
-          if (existing) {
-            existing.quantity += empty.quantity;
-          } else {
-            updatedEmpties.push(empty);
-          }
-        });
+        // 🔥 CORRECCIÓN CLAVE:
+        // Hemos eliminado el bloque que sumaba los `returnedEmpties` al manifiesto.
+        // La venta en ruta NO debe registrar los vacíos en el manifiesto todavía,
+        // ya que el chofer los tiene en el camión. Solo se guardan en el ticket de venta.
+        // El manifiesto se actualizará recién cuando el chofer los descargue en el Pit Stop o Liquidación.
 
         transaction.update(manifestRef, {
           cashExpected: (manifest.cashExpected || 0) + data.cashReceived,
           digitalPaymentsExpected:
             (manifest.digitalPaymentsExpected || 0) + data.digitalReceived,
           items: updatedItems,
-          emptiesReturned: updatedEmpties,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       } else if (data.saleType === "PLANT") {
-        // VENTA EN PLANTA: Actualizar el almacén central (Descontar llenos, aumentar vacíos)
+        // VENTA EN PLANTA: Actualizar el almacén central directo (Descontar llenos, aumentar vacíos)
         data.items.forEach((item) => {
           const productRef = adminDb
             .collection(PRODUCTS_COLLECTION)
@@ -204,9 +216,6 @@ export const salesRepository = {
     });
   },
 
-  /**
-   * Obtiene el historial de ventas recientes
-   */
   async getRecentSales(limitCount = 100): Promise<Sale[]> {
     const snapshot = await adminDb
       .collection(SALES_COLLECTION)
@@ -227,9 +236,6 @@ export const salesRepository = {
     });
   },
 
-  /**
-   * Obtiene ventas paginadas desde el servidor (Escalable a 10,000+ registros)
-   */
   async getPaginatedSales(
     limitCount: number,
     lastCreatedAtIso?: string,
@@ -237,15 +243,12 @@ export const salesRepository = {
   ): Promise<Sale[]> {
     let query: admin.firestore.Query = adminDb.collection(SALES_COLLECTION);
 
-    // 1. Aplicar Filtro Nativo (Requiere Índice Compuesto en Firebase)
     if (paymentFilter && paymentFilter !== "ALL") {
       query = query.where("paymentMethod", "==", paymentFilter);
     }
 
-    // 2. Ordenamiento obligatorio para los cursores
     query = query.orderBy("createdAt", "desc").limit(limitCount);
 
-    // 3. Lógica del Cursor (startAfter)
     if (lastCreatedAtIso) {
       const lastDate = new Date(lastCreatedAtIso);
       const lastTimestamp = admin.firestore.Timestamp.fromDate(lastDate);
@@ -274,7 +277,6 @@ export const salesRepository = {
 
       if (!customerDoc.exists) throw new Error("Cliente no encontrado");
 
-      // 1. Traer tickets con saldo pendiente (FIFO)
       const pendingQuery = adminDb
         .collection(SALES_COLLECTION)
         .where("customerId", "==", data.customerId)
@@ -284,11 +286,8 @@ export const salesRepository = {
       const pendingSnap = await transaction.get(pendingQuery);
 
       let amountToDistribute = data.amount;
-
-      // ESTA ES LA MEMORIA: Guardará [{ saleId: "...", amount: 50 }, ...]
       const appliedTo: { saleId: string; amountApplied: number }[] = [];
 
-      // 2. Algoritmo de distribución FIFO con Memoria
       for (const doc of pendingSnap.docs) {
         if (amountToDistribute <= 0) break;
 
@@ -297,7 +296,6 @@ export const salesRepository = {
         let appliedInThisTicket = 0;
 
         if (amountToDistribute >= currentBalance) {
-          // Se liquida el ticket completo
           appliedInThisTicket = currentBalance;
           amountToDistribute -= currentBalance;
 
@@ -307,7 +305,6 @@ export const salesRepository = {
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
         } else {
-          // Se abona parcialmente y se acaba el dinero del pago
           appliedInThisTicket = amountToDistribute;
           const newBalance = currentBalance - amountToDistribute;
           amountToDistribute = 0;
@@ -319,40 +316,34 @@ export const salesRepository = {
           });
         }
 
-        // Guardamos en la memoria qué ticket tocamos y con cuánto
         appliedTo.push({
           saleId: doc.id,
           amountApplied: appliedInThisTicket,
         });
       }
 
-      // 3. Actualizar Deuda Global del Cliente
       transaction.update(customerRef, {
         debtAmount: admin.firestore.FieldValue.increment(-data.amount),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // 4. Registrar el Comprobante de Pago con su "Memoria"
       const paymentRef = adminDb.collection("debtPayments").doc();
       transaction.set(paymentRef, {
         ...data,
-        appliedTo: appliedTo, // <--- ¡AQUÍ ESTÁ LA CLAVE PARA ANULACIONES!
-        status: "ACTIVE", // Un pago nace activo
+        appliedTo: appliedTo,
+        status: "ACTIVE",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         receivedById: data.receivedById || "ADMIN_DIRECT_PAYMENT",
       });
     });
   },
 
-  /**
-   * Obtiene solo los tickets con saldo pendiente de un cliente (Orden FIFO)
-   */
   async getPendingSalesByCustomer(customerId: string): Promise<Sale[]> {
     const snapshot = await adminDb
       .collection(SALES_COLLECTION)
       .where("customerId", "==", customerId)
       .where("paymentStatus", "in", ["UNPAID", "PARTIAL"])
-      .orderBy("createdAt", "asc") // FIFO: El más antiguo primero
+      .orderBy("createdAt", "asc")
       .get();
 
     return snapshot.docs.map((doc) => {
@@ -360,7 +351,6 @@ export const salesRepository = {
       return {
         ...data,
         id: doc.id,
-        // Serializamos AMBOS timestamps a formato texto (ISO)
         createdAt:
           data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
         updatedAt:
@@ -369,9 +359,6 @@ export const salesRepository = {
     });
   },
 
-  /**
-   * Obtiene el historial de abonos de deuda de un cliente.
-   */
   async getCustomerPaymentHistory(customerId: string): Promise<any[]> {
     const snapshot = await adminDb
       .collection("debtPayments")
@@ -384,27 +371,19 @@ export const salesRepository = {
       return {
         id: doc.id,
         ...data,
-        // Convertimos TODOS los posibles Timestamps de Firebase a Strings ISO
         createdAt:
           data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
         updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-        cancelledAt: data.cancelledAt?.toDate?.()?.toISOString() || null, // <--- ESTA LÍNEA FALTABA
+        cancelledAt: data.cancelledAt?.toDate?.()?.toISOString() || null,
       };
     });
   },
 
-  /**
-   * Anula un pago, revirtiendo el saldo a los tickets afectados (FIFO) y al cliente.
-   * Cumple con la regla estricta de Firestore: Leer todo primero, Escribir después.
-   */
   async cancelPayment(
     paymentId: string,
     cancelledByUid: string,
   ): Promise<void> {
     return await adminDb.runTransaction(async (transaction) => {
-      // ==========================================
-      // 1. FASE DE LECTURAS (READS)
-      // ==========================================
       const paymentRef = adminDb.collection("debtPayments").doc(paymentId);
       const paymentDoc = await transaction.get(paymentRef);
 
@@ -417,21 +396,14 @@ export const salesRepository = {
         throw new Error("Este pago ya fue anulado previamente.");
       }
 
-      // Preparamos las referencias de todos los tickets que debemos leer
       const appliedTo = payment.appliedTo || [];
       const saleRefs = appliedTo.map((item: any) =>
         adminDb.collection(SALES_COLLECTION).doc(item.saleId),
       );
 
-      // Leemos TODOS los tickets de un solo golpe usando getAll (Mucho más rápido y seguro)
       const saleDocs =
         saleRefs.length > 0 ? await transaction.getAll(...saleRefs) : [];
 
-      // ==========================================
-      // 2. FASE DE ESCRITURAS (WRITES)
-      // ==========================================
-
-      // A) Devolver el dinero a la deuda global del cliente
       const customerRef = adminDb
         .collection("customers")
         .doc(payment.customerId);
@@ -440,18 +412,13 @@ export const salesRepository = {
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // B) Revertir los tickets individuales en base a los documentos leídos
       appliedTo.forEach((item: any, index: number) => {
         const saleDoc = saleDocs[index];
 
         if (saleDoc && saleDoc.exists) {
           const saleData = saleDoc.data() as any;
-
-          // Le devolvemos el saldo que este pago le había quitado
           const newBalance =
             (saleData.remainingBalance || 0) + item.amountApplied;
-
-          // Recalculamos el estado
           const newStatus =
             newBalance >= saleData.totalAmount ? "UNPAID" : "PARTIAL";
 
@@ -463,13 +430,97 @@ export const salesRepository = {
         }
       });
 
-      // C) Marcar el comprobante como anulado para auditoría
       transaction.update(paymentRef, {
         status: "CANCELLED",
         cancelledBy: cancelledByUid,
         cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+    });
+  },
+
+  // 🔥 CORRECCIÓN CRÍTICA: Filtrado en memoria para evitar errores de índice en Firebase
+  async getUnbilledSales() {
+    // 1. Buscamos solo por isBilled para no forzar la creación de un Índice Compuesto
+    const snapshot = await adminDb
+      .collection(SALES_COLLECTION)
+      .where("isBilled", "==", false)
+      .get();
+
+    // 2. Mapeamos TODA la data (incluyendo items) y serializamos fechas
+    const pendingSales = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        issueDate: data.createdAt?.toDate
+          ? data.createdAt.toDate().toLocaleDateString("es-PE")
+          : "Sin fecha",
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+      };
+    });
+
+    // 3. Filtramos en memoria los que "saltaron" facturación y ordenamos por fecha descendente
+    return pendingSales
+      .filter((sale: any) => sale.billingSkipped !== true)
+      .sort((a: any, b: any) => {
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+        return dateB - dateA; // Descendente (los más nuevos primero)
+      });
+  },
+
+  async getSaleDetailFull(saleId: string) {
+    const saleDoc = await adminDb
+      .collection(SALES_COLLECTION)
+      .doc(saleId)
+      .get();
+    if (!saleDoc.exists) return null;
+    const saleData: any = { id: saleDoc.id, ...saleDoc.data() };
+
+    const customerDoc = await adminDb
+      .collection("customers")
+      .doc(saleData.customerId)
+      .get();
+    const customerData: any = customerDoc.exists
+      ? { id: customerDoc.id, ...customerDoc.data() }
+      : null;
+
+    let sunatData: any = null;
+    if (saleData.sunatDocumentId) {
+      const sunatDoc = await adminDb
+        .collection("sunatDocuments")
+        .doc(saleData.sunatDocumentId)
+        .get();
+      if (sunatDoc.exists) sunatData = { id: sunatDoc.id, ...sunatDoc.data() };
+    }
+
+    let greData: any = null;
+    const greSnapshot = await adminDb
+      .collection("sunatDocuments")
+      .where("saleId", "==", saleId)
+      .where("type", "==", "09")
+      .limit(1)
+      .get();
+
+    if (!greSnapshot.empty) {
+      greData = { id: greSnapshot.docs[0].id, ...greSnapshot.docs[0].data() };
+    }
+
+    const trucksSnapshot = await adminDb.collection("trucks").get();
+    const trucks = trucksSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    const usersSnapshot = await adminDb.collection("users").get();
+    const drivers = usersSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    return serializeFirestoreData({
+      saleData,
+      customerData,
+      sunatData,
+      greData,
+      trucks,
+      drivers,
     });
   },
 };

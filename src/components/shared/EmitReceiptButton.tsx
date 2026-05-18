@@ -2,12 +2,19 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { FileText, Receipt, Loader2, CheckCircle2 } from "lucide-react";
-import { emitirComprobanteAction } from "@/app/actions/sunatActions"; // Ajusta tu ruta
+import {
+  FileText,
+  Receipt,
+  Loader2,
+  CheckCircle2,
+  ArrowRight,
+} from "lucide-react";
+import { emitirComprobanteAction } from "@/app/actions/sunatActions";
+import Link from "next/link";
 
 interface EmitReceiptButtonProps {
   saleId: string;
-  customerDocument: string; // Para decidir automáticamente Factura vs Boleta
+  customerDocument: string;
 }
 
 export function EmitReceiptButton({
@@ -19,9 +26,9 @@ export function EmitReceiptButton({
     id: string;
     xmlUrl: string;
     cdrUrl: string;
+    pdfUrl: string; // <-- AÑADIDO EL PDF
   } | null>(null);
 
-  // Lógica: Si el cliente tiene RUC (11 dígitos, empieza en 10 o 20) es Factura (01), si no, Boleta (03)
   const isRuc =
     customerDocument.length === 11 &&
     (customerDocument.startsWith("10") || customerDocument.startsWith("20"));
@@ -29,17 +36,24 @@ export function EmitReceiptButton({
   const label = isRuc ? "Emitir Factura" : "Emitir Boleta";
   const Icon = isRuc ? FileText : Receipt;
 
+  // FUNCIÓN PARA CONVERTIR RUTAS INTERNAS EN URLS PÚBLICAS DE DESCARGA
+  const getStorageUrl = (path: string) => {
+    if (!path) return "#";
+    if (path.startsWith("http")) return path;
+    return `https://firebasestorage.googleapis.com/v0/b/${process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(path)}?alt=media`;
+  };
+
   const handleEmit = async () => {
     if (
       !window.confirm(
-        `¿Estás seguro de emitir una ${isRuc ? "Factura" : "Boleta"} electrónica a la SUNAT para este ticket? Esta acción no se puede deshacer directamente.`,
+        `¿Estás seguro de emitir una ${isRuc ? "Factura" : "Boleta"} electrónica a la SUNAT para este ticket?`,
       )
-    ) {
+    )
       return;
-    }
 
     setIsEmitting(true);
-    const result = await emitirComprobanteAction(saleId, documentType);
+    // Pasamos el ID dentro de un arreglo para soportar la acción de consolidación
+    const result = await emitirComprobanteAction([saleId], documentType);
     setIsEmitting(false);
 
     if (result.success) {
@@ -50,40 +64,62 @@ export function EmitReceiptButton({
         id: result.documentId as string,
         xmlUrl: result.xmlUrl as string,
         cdrUrl: result.cdrUrl as string,
+        pdfUrl: result.pdfUrl as string, // Capturamos el PDF de la respuesta
       });
     } else {
-      toast.error("Error al emitir comprobante", {
-        description: result.error,
-      });
+      toast.error("Error al emitir comprobante", { description: result.error });
     }
   };
 
-  // Si ya se emitió con éxito en esta sesión, mostramos los enlaces de descarga
   if (successData) {
     return (
-      <div className="flex items-center gap-4 p-3 bg-emerald-50 border border-emerald-100 rounded-xl w-full sm:w-auto">
-        <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-        <div className="flex-1">
-          <p className="text-sm font-black text-emerald-900">
-            {successData.id} Aceptada
-          </p>
-          <div className="flex items-center gap-3 mt-1">
-            <a
-              href={successData.xmlUrl}
-              target="_blank"
-              className="text-[10px] font-bold text-emerald-600 hover:underline uppercase tracking-widest"
-            >
-              Descargar XML
-            </a>
-            <a
-              href={successData.cdrUrl}
-              target="_blank"
-              className="text-[10px] font-bold text-emerald-600 hover:underline uppercase tracking-widest"
-            >
-              Descargar CDR
-            </a>
+      <div className="flex flex-col gap-3 w-full sm:w-auto">
+        <div className="flex items-center gap-4 p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
+          <CheckCircle2 className="h-6 w-6 text-emerald-600 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-black text-emerald-900">
+              {successData.id} Aceptada
+            </p>
+            <div className="flex flex-wrap items-center gap-3 mt-1">
+              {successData.pdfUrl && (
+                <a
+                  href={getStorageUrl(successData.pdfUrl)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] font-bold text-emerald-600 hover:underline uppercase tracking-widest"
+                >
+                  Descargar PDF
+                </a>
+              )}
+              {successData.xmlUrl && (
+                <a
+                  href={getStorageUrl(successData.xmlUrl)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] font-bold text-emerald-600 hover:underline uppercase tracking-widest"
+                >
+                  Descargar XML
+                </a>
+              )}
+              {successData.cdrUrl && (
+                <a
+                  href={getStorageUrl(successData.cdrUrl)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] font-bold text-emerald-600 hover:underline uppercase tracking-widest"
+                >
+                  Descargar CDR
+                </a>
+              )}
+            </div>
           </div>
         </div>
+        <Link
+          href={`/sales/${saleId}`}
+          className="text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 py-2 rounded-lg text-center flex items-center justify-center gap-2 transition-colors"
+        >
+          Ver Detalles y Guía <ArrowRight className="h-3 w-3" />
+        </Link>
       </div>
     );
   }

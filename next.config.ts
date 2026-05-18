@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     "xpath",
     "@xmldom/xmldom",
     "node-forge",
+    "pdfkit",
   ],
   async redirects() {
     return [

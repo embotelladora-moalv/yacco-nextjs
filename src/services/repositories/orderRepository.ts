@@ -114,19 +114,60 @@ export const orderRepository = {
   async assignOrdersBulk(
     orderIds: string[],
     manifestId: string,
+    guideRequested: boolean = false, // <-- Recibe el parámetro
   ): Promise<void> {
-    const batch = adminDb.batch(); // Inicia la transacción en lote
+    const batch = adminDb.batch();
 
     orderIds.forEach((orderId) => {
       const orderRef = adminDb.collection(ORDERS_COLLECTION).doc(orderId);
       batch.update(orderRef, {
         status: "ASSIGNED",
         manifestId,
+        guideRequested, // <-- Guarda la bandera
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
 
-    await batch.commit(); // Ejecuta todo de golpe
+    await batch.commit();
+  },
+
+  async unassignOrdersBulk(orderIds: string[]): Promise<void> {
+    const batch = adminDb.batch();
+
+    orderIds.forEach((orderId) => {
+      const orderRef = adminDb.collection(ORDERS_COLLECTION).doc(orderId);
+      batch.update(orderRef, {
+        status: "PENDING",
+        manifestId: admin.firestore.FieldValue.delete(), // Lo quitamos del camión
+        guideRequested: admin.firestore.FieldValue.delete(), // Limpiamos la bandera
+        guideDocumentId: admin.firestore.FieldValue.delete(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    await batch.commit();
+  },
+
+  async unassignPendingOrdersFromManifest(manifestId: string): Promise<void> {
+    const snapshot = await adminDb
+      .collection(ORDERS_COLLECTION)
+      .where("manifestId", "==", manifestId)
+      .where("status", "==", "ASSIGNED") // Solo los que no se entregaron
+      .get();
+
+    if (snapshot.empty) return;
+
+    const batch = adminDb.batch();
+    snapshot.docs.forEach((doc) => {
+      batch.update(doc.ref, {
+        status: "PENDING",
+        manifestId: admin.firestore.FieldValue.delete(),
+        guideRequested: admin.firestore.FieldValue.delete(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    await batch.commit();
   },
 
   /**

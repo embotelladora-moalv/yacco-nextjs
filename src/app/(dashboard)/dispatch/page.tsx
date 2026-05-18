@@ -1,12 +1,17 @@
 import { dispatchRepository } from "@/services/repositories/dispatchRepository";
 import { userRepository } from "@/services/repositories/userRepository";
+import { inventoryRepository } from "@/services/repositories/inventoryRepository";
 import { DispatchDashboard } from "./DispatchDashboard";
 
 export const dynamic = "force-dynamic";
 
 export default async function DispatchPage() {
-  // 1. Obtenemos todos los despachos
-  const rawDispatches = await dispatchRepository.getRecentDispatches();
+  // 1. Ejecutamos consultas concurrentes en el servidor para evitar cascadas (waterfalls)
+  const [rawDispatches, rawUsers, products] = await Promise.all([
+    dispatchRepository.getRecentDispatches(),
+    userRepository.getAll(),
+    inventoryRepository.getAllProducts(),
+  ]);
 
   // 2. Serializamos los despachos (Convertimos Timestamps de Firebase a Strings ISO)
   const dispatches = rawDispatches.map((dispatch: any) => ({
@@ -25,8 +30,7 @@ export default async function DispatchPage() {
       : dispatch.updatedAt,
   }));
 
-  // 3. Obtenemos y serializamos los usuarios
-  const rawUsers = await userRepository.getAll();
+  // 3. Serializamos los objetos de usuarios de forma segura
   const users = rawUsers.map((user) => ({
     ...user,
     createdAt:
@@ -40,9 +44,13 @@ export default async function DispatchPage() {
   }));
 
   return (
-    <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4 sm:px-6">
-      {/* Ahora ambos arreglos contienen solo objetos planos (strings y números) */}
-      <DispatchDashboard dispatches={dispatches} users={users as any} />
+    <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4">
+      {/* 4. Enviamos la información limpia al cliente orquestador */}
+      <DispatchDashboard
+        dispatches={dispatches}
+        users={users}
+        products={products}
+      />
     </div>
   );
 }

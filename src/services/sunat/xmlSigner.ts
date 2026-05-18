@@ -1,8 +1,9 @@
 // src/services/sunat/xmlSigner.ts
 import * as forge from "node-forge";
+import { SignedXml } from "xml-crypto";
 
 /**
- * Extrae llaves del PFX siguiendo el estándar X.509 v3 exigido
+ * Extrae la llave privada (PEM) y el certificado (PEM) del PFX (.p12)
  */
 function extractKeysFromPfx(pfxBase64: string, password: string) {
   const pfxDer = forge.util.decode64(pfxBase64);
@@ -11,83 +12,102 @@ function extractKeysFromPfx(pfxBase64: string, password: string) {
 
   const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
   const certBag = certBags[forge.pki.oids.certBag]?.[0];
-  if (!certBag || !certBag.cert) throw new Error("Certificado no encontrado");
-
+  if (!certBag?.cert) throw new Error("Certificado no encontrado en el .p12");
   const certPem = forge.pki.certificateToPem(certBag.cert);
-  const cleanCert = certPem.replace(
-    /-----(BEGIN|END) CERTIFICATE-----|[\n\r]/g,
-    "",
+
+  const keyBag =
+    p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[
+      forge.pki.oids.pkcs8ShroudedKeyBag
+    ]?.[0] ??
+    p12.getBags({ bagType: forge.pki.oids.keyBag })[forge.pki.oids.keyBag]?.[0];
+
+  if (!keyBag?.key) throw new Error("Llave privada no encontrada en el .p12");
+  const privateKeyPem = forge.pki.privateKeyToPem(
+    keyBag.key as forge.pki.rsa.PrivateKey,
   );
 
-  let keyBag = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[
-    forge.pki.oids.pkcs8ShroudedKeyBag
-  ]?.[0];
-  if (!keyBag)
-    keyBag = p12.getBags({ bagType: forge.pki.oids.keyBag })[
-      forge.pki.oids.keyBag
-    ]?.[0];
-  if (!keyBag || !keyBag.key) throw new Error("Llave privada no encontrada");
-
-  return { privateKey: keyBag.key, cleanCert };
+  return { privateKeyPem, certPem };
 }
 
 /**
- * Implementación de firma digital basada en el Manual del Programador SUNAT
+ * Firma el XML con XMLDSig usando xml-crypto v6 (C14N real).
+ *
+ * Notas clave sobre xml-crypto v6:
+ *  - `xpath` selecciona QUÉ NODOS se hashean.
+ *  - `isEmptyUri: true` produce URI="" en el XML de salida (referencia al documento completo).
+ *  - La firma se inyecta en <ext:ExtensionContent> como exige SUNAT.
+ *
+ * El namespace xmlns:ds debe estar declarado en el root del XML generado por
+ * xmlGenerator.ts para que la inyección sea válida bajo validación estricta.
  */
 export function signXml(xmlString: string): string {
-  const { privateKey, cleanCert } = extractKeysFromPfx(
+  const { privateKeyPem, certPem } = extractKeysFromPfx(
     process.env.SUNAT_CERT_BASE64!,
     process.env.SUNAT_CERT_PASSWORD!,
   );
 
-  // 1. CANONICALIZACIÓN: SUNAT exige firmar el documento completo (URI="")
-  // Eliminamos espacios entre etiquetas para asegurar que el hash coincida tras la recepción
-  const xmlBody = xmlString.replace(/<\?xml.*?\?>/, "").trim();
-  const canonicalXml = xmlBody.replace(/>\s+</g, "><");
+  const sig = new SignedXml({
+    privateKey: privateKeyPem,
+    publicCert: certPem,
+    signatureAlgorithm: "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+    canonicalizationAlgorithm:
+      "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+  });
 
-  // 2. DIGEST: Calculamos el hash SHA-256 del contenido
-  const md = forge.md.sha256.create();
-  md.update(canonicalXml, "utf8");
-  const digestValue = forge.util.encode64(md.digest().getBytes());
+  sig.addReference({
+    xpath: "/*",
+    isEmptyUri: true,
+    transforms: [
+      "http://www.w3.org/2000/09/xmldsig#enveloped-signature",
+      "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+    ],
+    digestAlgorithm: "http://www.w3.org/2001/04/xmlenc#sha256",
+  });
 
-  // 3. SIGNED INFO: Bloque de control estructural
-  const signedInfoXml =
-    `<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">` +
-    `<ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>` +
-    `<ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>` +
-    `<ds:Reference URI="">` +
-    `<ds:Transforms>` +
-    `<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>` +
-    `</ds:Transforms>` +
-    `<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>` +
-    `<ds:DigestValue>${digestValue}</ds:DigestValue>` +
-    `</ds:Reference>` +
-    `</ds:SignedInfo>`;
+  // Paso 1: xml-crypto calcula la firma y la añade al final del root
+  sig.computeSignature(xmlString, { prefix: "ds" });
+  const signedXml = sig.getSignedXml();
 
-  // 4. FIRMA: SignatureValue (RSA-SHA256)
-  const mdSig = forge.md.sha256.create();
-  mdSig.update(signedInfoXml, "utf8");
-  const signatureValue = forge.util.encode64((privateKey as any).sign(mdSig));
+  // Paso 2: extraer el bloque <ds:Signature>
+  const sigStart = signedXml.indexOf("<ds:Signature");
+  const sigEnd =
+    signedXml.indexOf("</ds:Signature>") + "</ds:Signature>".length;
 
-  // 5. ENSAMBLAJE: Estructura final de la firma
-  const fullSignature =
-    `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="SignatureRosimo">` +
-    signedInfoXml +
-    `<ds:SignatureValue>${signatureValue}</ds:SignatureValue>` +
-    `<ds:KeyInfo>` +
-    `<ds:X509Data>` +
-    `<ds:X509Certificate>${cleanCert}</ds:X509Certificate>` +
-    `</ds:X509Data>` +
-    `</ds:KeyInfo>` +
-    `</ds:Signature>`;
+  if (sigStart === -1 || sigEnd < "</ds:Signature>".length) {
+    throw new Error("xml-crypto no generó el bloque <ds:Signature>");
+  }
+  const signatureBlock = signedXml.substring(sigStart, sigEnd);
 
-  // 6. INYECCIÓN: La firma se consigna en ext:ExtensionContent
-  const finalXml =
-    `<?xml version="1.0" encoding="UTF-8"?>\n` +
-    canonicalXml.replace(
-      /<ext:ExtensionContent\s*\/?>(?:<\/ext:ExtensionContent>)?/,
-      `<ext:ExtensionContent>${fullSignature}</ext:ExtensionContent>`,
+  // Paso 3: quitar la firma del lugar donde xml-crypto la puso (final del root)
+  // ── FIX: use a targeted replace that won't break if signatureBlock contains
+  //    characters that are special to String.replace ($ signs in base64).
+  const xmlSinFirma = signedXml.slice(0, sigStart) + signedXml.slice(sigEnd);
+
+  // Paso 4: inyectar dentro de <ext:ExtensionContent> (vacío o auto-cerrado)
+  const finalXml = xmlSinFirma.replace(
+    /<ext:ExtensionContent\s*(?:\/>|><\/ext:ExtensionContent>)/,
+    () => `<ext:ExtensionContent>${signatureBlock}</ext:ExtensionContent>`,
+    // ↑ Using a replacer function avoids String.replace treating `$` in the
+    //   signature's base64 values as special replacement patterns.
+  );
+
+  if (!finalXml.includes("<ds:Signature")) {
+    throw new Error(
+      "No se pudo inyectar la firma: <ext:ExtensionContent> no encontrado. " +
+        "Verifica que xmlGenerator.ts genera ese nodo vacío.",
     );
+  }
+
+  // ── DEBUG: imprime el XML firmado final para validación antes de enviar ──
+  // Elimina estas líneas una vez que SUNAT acepte el documento.
+  console.log(
+    "[signXml] XML firmado (primeros 2000 chars):\n",
+    finalXml.substring(0, 2000),
+  );
+  console.log(
+    "[signXml] XML firmado (últimos 500 chars):\n",
+    finalXml.substring(finalXml.length - 500),
+  );
 
   return finalXml;
 }

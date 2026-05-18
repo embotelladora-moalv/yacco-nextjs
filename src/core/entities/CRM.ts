@@ -33,6 +33,13 @@ export interface Customer {
   containerBalances: CustomerContainerBalance[];
   debtAmount?: number;
   isActive: boolean;
+
+  lastSaleDate?: string | null;
+  monetaryDebt?: number;
+
+  // 🔥 AGREGA ESTA LÍNEA AQUÍ:
+  alwaysRequiresBilling?: boolean;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,6 +75,8 @@ export interface Sale {
   status: "COMPLETED" | "CANCELLED";
   paymentStatus: "UNPAID" | "PARTIAL" | "PAID"; // <-- NUEVO
   remainingBalance: number;
+  isBilled?: boolean;
+  sunatDocumentId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

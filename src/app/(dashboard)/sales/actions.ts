@@ -2,67 +2,86 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { adminAuth } from "@/services/firebase/admin";
+// Asegúrate de exportar adminDb desde este archivo junto con adminAuth
+import { adminAuth, adminDb } from "@/services/firebase/admin";
+import * as admin from "firebase-admin";
 import { salesRepository } from "@/services/repositories/salesRepository";
 import { dispatchRepository } from "@/services/repositories/dispatchRepository";
 import { saleSchema, SaleFormValues } from "@/core/validations/crmSchemas";
 import { revalidatePath } from "next/cache";
 
-export async function registerSaleAction(data: SaleFormValues) {
+export async function registerSaleAction(
+  data: SaleFormValues & { linkedOrderId?: string },
+) {
   try {
-    // 1. Validar estrictamente los datos con Zod
     const parsedData = saleSchema.parse(data);
 
-    // 2. OBTENER EL USUARIO REAL (Auditoría)
+    // Auditoría de Usuario
     const cookieStore = await cookies();
     const sessionCookie = cookieStore.get("yacco_session")?.value;
+    if (!sessionCookie)
+      throw new Error("No hay una sesión activa. Vuelva a iniciar sesión.");
 
-    if (!sessionCookie) {
-      throw new Error(
-        "No hay una sesión activa. Por favor, vuelva a iniciar sesión.",
-      );
-    }
-
-    // Decodificamos la cookie usando tu adminAuth para obtener el UID real del admin
     const decodedClaims = await adminAuth.verifySessionCookie(
       sessionCookie,
       true,
     );
     const registeredByUid = decodedClaims.uid;
 
-    // 3. DETERMINAR EL CHOFER (Dueño del inventario y del dinero)
-    let actualDriverId = "ADMIN_PLANT"; // Por defecto, la plata va a la caja de la planta
-
+    // Asignación de caja e inventario (Chofer o Planta)
+    let actualDriverId = "ADMIN_PLANT";
     if (parsedData.saleType === "ROUTE" && parsedData.manifestId) {
-      // Si eligieron "Camión en Ruta", el dinero y el stock le pertenecen al chofer
-      const manifest = await dispatchRepository.getManifestById(
+      const manifest = await dispatchRepository.getDispatchById(
         parsedData.manifestId,
       );
-
-      if (!manifest) {
-        throw new Error(
-          "El manifiesto seleccionado no existe o fue eliminado.",
-        );
-      }
-
+      if (!manifest) throw new Error("El manifiesto seleccionado no existe.");
       actualDriverId = manifest.driverId;
     }
 
-    // 4. Ejecutar la transacción maestra
-    // NOTA: Asegúrate de que en tu salesRepository.ts, al crear el 'saleDoc',
-    // le agregues el campo: registeredBy: registeredByUid
+    // Calculamos el total exacto de los items reales
+    const calculatedTotalAmount = parsedData.items.reduce(
+      (sum, item) => sum + Number(item.quantity) * Number(item.unitPrice),
+      0,
+    );
+
+    // Invocamos el repositorio maestro para inyectar el total y guardar la venta
     const saleId = await salesRepository.registerSale(
-      parsedData,
-      actualDriverId, // Se guarda como driverId
+      {
+        ...parsedData,
+        totalAmount: calculatedTotalAmount,
+      } as any,
+      actualDriverId,
       registeredByUid,
     );
 
-    // 5. Limpiar caché de las vistas afectadas
-    revalidatePath("/customers");
-    revalidatePath(`/customers/${data.customerId}`);
-    if (data.manifestId) revalidatePath(`/dispatch/${data.manifestId}`);
-    revalidatePath("/dispatch");
+    // 🔥 VÍNCULO LOGÍSTICO: Si nació de un pedido, cerramos su estado atómicamente
+    if (data.linkedOrderId) {
+      await adminDb.collection("orders").doc(data.linkedOrderId).update({
+        status: "DELIVERED",
+        saleId: saleId,
+        deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    // COLA AUTOMÁTICA DE SUNAT (Si se marcó la casilla de emisión de boleta/factura)
+    if (parsedData.requiresBilling) {
+      await adminDb.collection("sunatQueue").add({
+        referenceId: saleId,
+        referenceType: "SALE",
+        status: "PENDING",
+        requiresBilling: true,
+        requiresGuide: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    // Sincronización y purga de cachés de Next.js
+    revalidatePath("/orders");
     revalidatePath("/sales");
+    revalidatePath("/customers");
+    if (parsedData.manifestId)
+      revalidatePath(`/dispatch/${parsedData.manifestId}`);
 
     return { success: true, saleId };
   } catch (error: any) {

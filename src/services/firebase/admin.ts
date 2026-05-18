@@ -1,29 +1,4 @@
-// import admin from "firebase-admin";
-// import serviceAccount from "../../../serviceAccount.json";
-
-// if (!admin.apps.length) {
-//   try {
-//     // Si estamos en desarrollo, el SDK usará las variables de entorno para emuladores
-//     admin.initializeApp({
-//       credential: admin.credential.cert(serviceAccount as any),
-//     });
-
-//     if (process.env.FIRESTORE_EMULATOR_HOST) {
-//       console.log("🔥 Firebase Admin operando sobre Firestore Emulator");
-//     } else {
-//       console.log("🔥 Firebase Admin inicializado (Producción/Cloud)");
-//     }
-//   } catch (error) {
-//     console.error("❌ Error inicializando Firebase Admin:", error);
-//   }
-// }
-
-// const adminDb = admin.firestore();
-// const adminAuth = admin.auth();
-
-// export { adminDb, adminAuth };
-
-// src/lib/firebase/serverApp.ts
+// src/services/firebase/admin.ts
 import * as admin from "firebase-admin";
 
 if (!admin.apps.length) {
@@ -31,7 +6,7 @@ if (!admin.apps.length) {
   const isEmulator = process.env.FIRESTORE_EMULATOR_HOST;
 
   admin.initializeApp({
-    // Si estamos en el emulador, solo pasamos el projectId (Firebase ignora las credenciales locales)
+    // Si estamos en el emulador, solo pasamos el projectId
     // Si estamos en producción, pasamos las credenciales completas
     ...(isEmulator
       ? { projectId: process.env.FIREBASE_PROJECT_ID || "demo-project" }
@@ -42,9 +17,11 @@ if (!admin.apps.length) {
             privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
           }),
         }),
+    // LÍNEA VITAL: Le dice a Firebase dónde guardar los archivos
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
   });
 }
 
 export const adminAuth = admin.auth();
 export const adminDb = admin.firestore();
-export const adminStorage = admin.storage(); // <-- ESTA LÍNEA ES LA QUE USAMOS HOY
+export const adminStorage = admin.storage();

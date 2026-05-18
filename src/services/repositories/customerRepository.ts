@@ -108,4 +108,69 @@ export const customerRepository = {
       lastSaleDate: data.lastSaleDate?.toDate?.()?.toISOString() || null,
     } as any;
   },
+
+  async getCustomersByIds(customerIds: string[]) {
+    const customersData: Record<string, any> = {};
+
+    // Dividimos en lotes de 10 (Límite de Firebase para la cláusula 'in')
+    const chunks = [];
+    for (let i = 0; i < customerIds.length; i += 10) {
+      chunks.push(customerIds.slice(i, i + 10));
+    }
+
+    for (const chunk of chunks) {
+      const snapshot = await adminDb
+        .collection("customers")
+        .where("__name__", "in", chunk)
+        .get();
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+
+        customersData[doc.id] = {
+          id: doc.id,
+          ...data,
+          // SERIALIZACIÓN OBLIGATORIA PARA NEXT.JS: Convertimos los Timestamps a strings ISO
+          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+          lastSaleDate: data.lastSaleDate?.toDate?.()?.toISOString() || null,
+        };
+      });
+    }
+
+    return customersData;
+  },
+
+  /**
+   * Obtiene la carga inicial de clientes (Paginada desde el servidor)
+   * Ideal para no colapsar la memoria del Frontend al cargar la tabla principal.
+   * @param limitSize Cantidad máxima de registros a traer (Por defecto 100)
+   */
+  async getInitialCustomers(limitSize: number = 100): Promise<Customer[]> {
+    const snapshot = await adminDb
+      .collection(CUSTOMERS_COLLECTION)
+      .orderBy("createdAt", "desc")
+      .limit(limitSize)
+      .get();
+
+    return snapshot.docs
+      .map((doc) => {
+        const data = doc.data();
+
+        // Verificamos que la data exista
+        if (!data) return null;
+
+        return {
+          id: doc.id,
+          ...data,
+          containerBalances: data.containerBalances || [],
+          locations: data.locations || [],
+          // SERIALIZACIÓN OBLIGATORIA PARA NEXT.JS SERVER COMPONENTS
+          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+          lastSaleDate: data.lastSaleDate?.toDate?.()?.toISOString() || null,
+        };
+      })
+      .filter((c): c is any => c !== null); // Filtramos nulos por seguridad
+  },
 };

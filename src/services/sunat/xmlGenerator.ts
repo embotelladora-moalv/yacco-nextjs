@@ -1,33 +1,40 @@
+// src/services/sunat/xmlGenerator.ts
+
 import { create } from "xmlbuilder2";
 
 /**
- * Genera el XML en formato UBL 2.1 para Facturas (01) y Boletas (03)
+ * Genera el XML en formato oficial UBL 2.1 para Facturas (01) y Boletas (03)
  */
 export function buildInvoiceXml(saleInfo: any) {
-  // 1. Cálculos Financieros (Asumiendo que los precios en tu base de datos ya incluyen IGV)
+  const RUC_EMPRESA = process.env.SUNAT_RUC || "20612769151";
+  const RAZON_SOCIAL =
+    process.env.EMPRESA_RAZON_SOCIAL || "EMBOTELLADORA MOALV S.A.C.";
+
   const IGV_RATE = 0.18;
   let totalVenta = 0;
   let totalGravadas = 0;
   let totalIgv = 0;
 
-  // Transformamos los items de tu carrito al estándar InvoiceLine de SUNAT
+  // 1. Mapeo de Ítems en formato UBL 2.1 Estricto
   const invoiceLines = saleInfo.items.map((item: any, index: number) => {
-    const lineTotal = item.quantity * item.unitPrice; // Total de la línea con IGV
-    const valorVenta = lineTotal / (1 + IGV_RATE); // Total de la línea sin IGV (Base imponible)
-    const valorUnitario = item.unitPrice / (1 + IGV_RATE); // Precio unitario sin IGV
-    const igvLinea = lineTotal - valorVenta; // Monto del IGV de esta línea
+    const lineTotal = item.quantity * item.unitPrice;
+    const valorVenta = lineTotal / (1 + IGV_RATE);
+    const valorUnitario = item.unitPrice / (1 + IGV_RATE);
+    const igvLinea = lineTotal - valorVenta;
 
-    // Sumamos a los totales globales
     totalVenta += lineTotal;
     totalGravadas += valorVenta;
     totalIgv += igvLinea;
+
+    const itemDescription =
+      item.name || item.description || "Producto de Planta";
 
     return {
       "cbc:ID": (index + 1).toString(),
       "cbc:InvoicedQuantity": {
         "@unitCode": "NIU",
         "#text": item.quantity.toString(),
-      }, // NIU = Unidades (Bienes)
+      },
       "cbc:LineExtensionAmount": {
         "@currencyID": "PEN",
         "#text": valorVenta.toFixed(2),
@@ -38,7 +45,7 @@ export function buildInvoiceXml(saleInfo: any) {
             "@currencyID": "PEN",
             "#text": item.unitPrice.toFixed(2),
           },
-          "cbc:PriceTypeCode": "01", // 01 = Indica que el precio ya incluye IGV
+          "cbc:PriceTypeCode": "01",
         },
       },
       "cac:TaxTotal": {
@@ -53,8 +60,9 @@ export function buildInvoiceXml(saleInfo: any) {
             "#text": igvLinea.toFixed(2),
           },
           "cac:TaxCategory": {
+            "cbc:ID": "S", // ← FIX: required by UBL 2.1 schema
             "cbc:Percent": "18.00",
-            "cbc:TaxExemptionReasonCode": "10", // 10 = Operación Gravada Onerosa
+            "cbc:TaxExemptionReasonCode": "10",
             "cac:TaxScheme": {
               "cbc:ID": "1000",
               "cbc:Name": "IGV",
@@ -64,7 +72,7 @@ export function buildInvoiceXml(saleInfo: any) {
         },
       },
       "cac:Item": {
-        "cbc:Description": item.description || "Producto/Servicio",
+        "cbc:Description": itemDescription.toUpperCase(),
       },
       "cac:Price": {
         "cbc:PriceAmount": {
@@ -77,9 +85,21 @@ export function buildInvoiceXml(saleInfo: any) {
 
   const isFactura = saleInfo.documentType === "01";
 
-  // 2. Estructura JSON que representa el UBL 2.1 exacto de la SUNAT
-  const xmlObj = {
+  // ── FIX: build the DespatchDocumentReference array only when it has entries.
+  // Passing `undefined` to xmlbuilder2 can produce a ghost empty element that
+  // breaks SUNAT's schema validation (cascades as error 2074).
+  const despatchRefs =
+    Array.isArray(saleInfo.guiasAsociadas) && saleInfo.guiasAsociadas.length > 0
+      ? saleInfo.guiasAsociadas.map((guiaId: string) => ({
+          "cbc:ID": guiaId,
+          "cbc:DocumentTypeCode": "09",
+        }))
+      : null; // xmlbuilder2 silently skips null values
+
+  // 2. Estructura Maestra JSON para UBL 2.1
+  const xmlObj: Record<string, any> = {
     Invoice: {
+      // ── Namespaces ──────────────────────────────────────────────────────────
       "@xmlns": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
       "@xmlns:cac":
         "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -87,8 +107,13 @@ export function buildInvoiceXml(saleInfo: any) {
         "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
       "@xmlns:ext":
         "urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2",
+      // ── FIX: declare ds namespace on the root element so it is in scope
+      // after the signature is injected into ext:ExtensionContent. Without
+      // this, some validators (and SUNAT's) may reject the document structure
+      // and surface it as error 2074 (UBLVersionID).
+      "@xmlns:ds": "http://www.w3.org/2000/09/xmldsig#",
 
-      // Bloque en blanco reservado para estampar la Firma Digital (XMLDSIG)
+      // Space reserved for the digital signature
       "ext:UBLExtensions": {
         "ext:UBLExtension": {
           "ext:ExtensionContent": "",
@@ -97,8 +122,9 @@ export function buildInvoiceXml(saleInfo: any) {
 
       "cbc:UBLVersionID": "2.1",
       "cbc:CustomizationID": "2.0",
-      "cbc:ID": saleInfo.documentId, // Ej: F001-000001
-      "cbc:IssueDate": saleInfo.issueDate, // Ej: 2026-05-15
+
+      "cbc:ID": saleInfo.documentId,
+      "cbc:IssueDate": saleInfo.issueDate,
       "cbc:IssueTime": "00:00:00",
       "cbc:InvoiceTypeCode": {
         "@listID": "0101",
@@ -106,24 +132,27 @@ export function buildInvoiceXml(saleInfo: any) {
       },
       "cbc:DocumentCurrencyCode": "PEN",
 
-      // DATOS DEL EMISOR (Rosimo Inversiones)
+      // ── FIX: only include this element when it has data (null is skipped)
+      ...(despatchRefs
+        ? { "cac:DespatchDocumentReference": despatchRefs }
+        : {}),
+
       "cac:AccountingSupplierParty": {
         "cac:Party": {
           "cac:PartyIdentification": {
-            "cbc:ID": { "@schemeID": "6", "#text": "20613042394" },
+            "cbc:ID": { "@schemeID": "6", "#text": RUC_EMPRESA },
           },
           "cac:PartyLegalEntity": {
-            "cbc:RegistrationName": "Rosimo Inversiones E.I.R.L.",
+            "cbc:RegistrationName": RAZON_SOCIAL,
           },
         },
       },
 
-      // DATOS DEL RECEPTOR (Cliente)
       "cac:AccountingCustomerParty": {
         "cac:Party": {
           "cac:PartyIdentification": {
             "cbc:ID": {
-              "@schemeID": isFactura ? "6" : "1", // 6 = RUC, 1 = DNI
+              "@schemeID": isFactura ? "6" : "1",
               "#text": saleInfo.customerDocument,
             },
           },
@@ -133,7 +162,6 @@ export function buildInvoiceXml(saleInfo: any) {
         },
       },
 
-      // SUMATORIA DE IMPUESTOS GLOBALES
       "cac:TaxTotal": {
         "cbc:TaxAmount": { "@currencyID": "PEN", "#text": totalIgv.toFixed(2) },
         "cac:TaxSubtotal": {
@@ -146,6 +174,8 @@ export function buildInvoiceXml(saleInfo: any) {
             "#text": totalIgv.toFixed(2),
           },
           "cac:TaxCategory": {
+            "cbc:ID": "S", // ← FIX: required by UBL 2.1 schema
+            "cbc:Percent": "18.00", // ← FIX: also required at global level
             "cac:TaxScheme": {
               "cbc:ID": "1000",
               "cbc:Name": "IGV",
@@ -155,7 +185,6 @@ export function buildInvoiceXml(saleInfo: any) {
         },
       },
 
-      // TOTALES MONETARIOS DE LA FACTURA
       "cac:LegalMonetaryTotal": {
         "cbc:LineExtensionAmount": {
           "@currencyID": "PEN",
@@ -171,12 +200,11 @@ export function buildInvoiceXml(saleInfo: any) {
         },
       },
 
-      // LÍNEAS DE PRODUCTOS
       "cac:InvoiceLine": invoiceLines,
     },
   };
 
-  // 3. Generamos el XML en texto plano
-  const doc = create({ version: "1.0", encoding: "ISO-8859-1" }, xmlObj);
-  return doc.end({ prettyPrint: false }); // OJO: false porque SUNAT a veces rechaza XMLs con tabulaciones/saltos de línea innecesarios.
+  // 3. Generamos el XML estructurado
+  const doc = create({ version: "1.0", encoding: "utf-8" }, xmlObj);
+  return doc.end({ prettyPrint: false });
 }

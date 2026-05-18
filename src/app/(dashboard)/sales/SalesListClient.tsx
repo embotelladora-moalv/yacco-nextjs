@@ -21,10 +21,12 @@ import {
   ChevronUp,
   Package,
   CheckCircle2,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import React from "react";
 import { EmitReceiptButton } from "@/components/shared/EmitReceiptButton";
+import Link from "next/link";
 
 interface SalesListProps {
   sales: Sale[];
@@ -254,6 +256,8 @@ export function SalesListClient({
                 <th className="px-6 py-4">Fecha y Ticket</th>
                 <th className="px-6 py-4">Cliente</th>
                 <th className="px-6 py-4">Pago</th>
+                {/* NUEVA COLUMNA ESTADO SUNAT */}
+                <th className="px-6 py-4 text-center">Estado SUNAT</th>
                 <th className="px-6 py-4 text-right">Total</th>
                 <th className="px-6 py-4 text-center">Detalle</th>
               </tr>
@@ -267,6 +271,16 @@ export function SalesListClient({
                 // Propiedades asumiendo que agregamos el registro de SUNAT en la base de datos
                 const sunatDocId = (sale as any).sunatDocumentId;
                 const isBilled = (sale as any).isBilled;
+
+                // 🔥 SOLUCIÓN: Si no existe 'totalAmount', lo calculamos sumando los productos
+                const totalAmountCalculated =
+                  sale.totalAmount ??
+                  sale.items?.reduce(
+                    (sum, item) =>
+                      sum + Number(item.quantity) * Number(item.unitPrice),
+                    0,
+                  ) ??
+                  0;
 
                 return (
                   <React.Fragment key={sale.id}>
@@ -305,9 +319,24 @@ export function SalesListClient({
                             </div>
                           )}
                       </td>
+
+                      {/* CELDA DE BADGE DE SUNAT */}
+                      <td className="px-6 py-4 text-center">
+                        {isBilled ? (
+                          <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider">
+                            <CheckCircle2 className="h-3 w-3" /> Facturado
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-500 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider">
+                            <Clock className="h-3 w-3" /> Pendiente
+                          </span>
+                        )}
+                      </td>
+
                       <td className="px-6 py-4 text-right">
                         <div className="text-lg font-black text-slate-900">
-                          S/ {sale.totalAmount.toFixed(2)}
+                          {/* 🔥 USAMOS LA VARIABLE CALCULADA */}
+                          S/ {totalAmountCalculated.toFixed(2)}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center text-slate-400">
@@ -322,7 +351,7 @@ export function SalesListClient({
                     {/* ACORDEÓN DE DETALLES Y SUNAT */}
                     {isExpanded && (
                       <tr className="bg-slate-50/80 border-b border-slate-200">
-                        <td colSpan={6} className="px-6 py-6">
+                        <td colSpan={7} className="px-6 py-6">
                           <div className="max-w-4xl mx-auto bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col lg:flex-row gap-8">
                             {/* LADO IZQUIERDO: PRODUCTOS */}
                             <div className="flex-1 space-y-4">
@@ -383,30 +412,64 @@ export function SalesListClient({
                                 Electrónico
                               </h4>
 
-                              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
+                              <div className="bg-slate-50 p-5 rounded-xl border border-slate-100 space-y-4">
                                 {isBilled ? (
-                                  <div className="text-center space-y-2">
-                                    <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto" />
-                                    <p className="text-sm font-black text-slate-900">
-                                      Enviado a SUNAT
-                                    </p>
-                                    <p className="text-[10px] font-bold text-emerald-600 bg-emerald-50 py-1 px-2 rounded-md inline-block uppercase tracking-wider">
-                                      {sunatDocId}
-                                    </p>
+                                  <div className="text-center space-y-3">
+                                    <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
+                                    <div>
+                                      <p className="text-sm font-black text-slate-900">
+                                        Enviado a SUNAT
+                                      </p>
+                                      <p className="text-xs font-bold text-emerald-600 bg-emerald-50 py-1 px-2 mt-1 rounded-md inline-block uppercase tracking-wider border border-emerald-100">
+                                        {sunatDocId}
+                                      </p>
+                                    </div>
+                                    <Button
+                                      asChild
+                                      variant="outline"
+                                      className="w-full mt-2 font-bold text-slate-600"
+                                    >
+                                      <Link href={`/sales/${sale.id}`}>
+                                        Ver Documentos (PDF/XML)
+                                      </Link>
+                                    </Button>
                                   </div>
                                 ) : (
                                   <div className="space-y-3">
-                                    <p className="text-xs text-slate-500 font-medium">
-                                      Este ticket aún no tiene un comprobante
-                                      con valor tributario asociado.
+                                    <p className="text-xs text-slate-500 font-medium text-center mb-2">
+                                      Este ticket está pendiente de emisión
+                                      tributaria o guía.
                                     </p>
-                                    {/* AQUÍ ESTÁ LA MAGIA DE LA FACTURACIÓN */}
+
+                                    {/* BOTÓN RÁPIDO DE FACTURACIÓN */}
                                     <EmitReceiptButton
                                       saleId={sale.id}
                                       customerDocument={
                                         customer?.documentNumber || ""
                                       }
                                     />
+
+                                    <div className="relative py-2">
+                                      <div className="absolute inset-0 flex items-center">
+                                        <span className="w-full border-t border-slate-200" />
+                                      </div>
+                                      <div className="relative flex justify-center">
+                                        <span className="bg-slate-50 px-2 text-[10px] uppercase font-bold text-slate-400 tracking-widest">
+                                          O también
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* NUEVO BOTÓN PARA IR DIRECTO A DETALLES (GUÍAS) */}
+                                    <Button
+                                      asChild
+                                      variant="outline"
+                                      className="w-full font-bold text-slate-700 bg-white border-slate-300 hover:bg-slate-100"
+                                    >
+                                      <Link href={`/sales/${sale.id}`}>
+                                        Ver Detalles y Emitir Guía (GRE)
+                                      </Link>
+                                    </Button>
                                   </div>
                                 )}
                               </div>

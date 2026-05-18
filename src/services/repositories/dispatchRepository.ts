@@ -2,6 +2,7 @@ import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { DispatchManifest, DispatchItem } from "@/core/entities/Dispatch";
 import { Product } from "@/core/entities/Inventory";
+import { orderRepository } from "./orderRepository";
 
 const DISPATCH_COLLECTION = "dispatchManifests";
 const PRODUCTION_COLLECTION = "productionBatches";
@@ -269,8 +270,57 @@ export const dispatchRepository = {
       if (manifestData?.status !== "ON_ROUTE")
         throw new Error("El manifiesto no está en ruta");
 
+      // =========================================================================
+      // 🚀 FASE 1: RECOPILACIÓN Y LECTURA DE DATOS ANTES DE LAS ESCRITURAS
+      // =========================================================================
+
+      // Obtenemos todos los productIds únicos involucrados en mermas, llenos y envases vacíos
+      const uniqueProductIds = Array.from(
+        new Set([
+          ...liquidationData.items.map((i) => i.productId),
+          ...liquidationData.returnedEmpties.map((e) => e.productId),
+        ]),
+      );
+
+      // Leemos de golpe todos los documentos de productos necesarios
+      const productDocsMap: Record<string, any> = {};
+      for (const pId of uniqueProductIds) {
+        const pRef = adminDb.collection(PRODUCTS_COLLECTION).doc(pId);
+        const pDoc = await transaction.get(pRef);
+        productDocsMap[pId] = pDoc.exists ? pDoc.data() : {};
+      }
+
+      // Leemos de golpe todas las referencias de producción (lotes) requeridas
+      const batchDocsMap: Record<string, { ref: any; currentStock: number }> =
+        {};
+      for (const reportedItem of liquidationData.items) {
+        if (reportedItem.quantityReturnedFull > 0) {
+          const batchQuery = await adminDb
+            .collection(PRODUCTION_COLLECTION)
+            .where("productId", "==", reportedItem.productId)
+            .where("lotNumber", "==", reportedItem.lotNumber)
+            .limit(1)
+            .get();
+
+          if (!batchQuery.empty) {
+            const docSnap = batchQuery.docs[0];
+            const liveBatchDoc = await transaction.get(docSnap.ref);
+            batchDocsMap[
+              `${reportedItem.productId}_${reportedItem.lotNumber}`
+            ] = {
+              ref: docSnap.ref,
+              currentStock: liveBatchDoc.exists
+                ? liveBatchDoc.data()?.currentStock || 0
+                : 0,
+            };
+          }
+        }
+      }
+
+      // =========================================================================
+      // ✍️ FASE 2: MUTACIÓN DE DATOS Y REGISTRO DE ESCRITURAS
+      // =========================================================================
       const kardexEntries: any[] = [];
-      // Leemos de items (o loadedItems por si es antiguo)
       const updatedItems = [
         ...(manifestData?.items || manifestData?.loadedItems || []),
       ];
@@ -278,7 +328,7 @@ export const dispatchRepository = {
       // 1. PROCESAR RETORNO DE LLENOS Y MERMAS
       for (const reportedItem of liquidationData.items) {
         const manifestItemIndex = updatedItems.findIndex(
-          (i) =>
+          (i: any) =>
             i.productId === reportedItem.productId &&
             i.lotNumber === reportedItem.lotNumber,
         );
@@ -301,30 +351,28 @@ export const dispatchRepository = {
           const productRef = adminDb
             .collection(PRODUCTS_COLLECTION)
             .doc(reportedItem.productId);
-          const productDoc = await transaction.get(productRef);
-          const currentFilled = productDoc.data()?.stockFilled || 0;
+
+          const currentFilled =
+            productDocsMap[reportedItem.productId]?.stockFilled || 0;
+          const newFilledStock =
+            currentFilled + reportedItem.quantityReturnedFull;
 
           transaction.update(productRef, {
-            stockFilled: currentFilled + reportedItem.quantityReturnedFull,
+            stockFilled: newFilledStock,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
 
-          const batchQuery = await transaction.get(
-            adminDb
-              .collection(PRODUCTION_COLLECTION)
-              .where("productId", "==", reportedItem.productId)
-              .where("lotNumber", "==", reportedItem.lotNumber)
-              .limit(1),
-          );
-          if (!batchQuery.empty) {
-            const batchRef = batchQuery.docs[0].ref;
-            const currentBatchStock =
-              batchQuery.docs[0].data().currentStock || 0;
-            transaction.update(batchRef, {
+          productDocsMap[reportedItem.productId].stockFilled = newFilledStock;
+
+          const batchInfo =
+            batchDocsMap[`${reportedItem.productId}_${reportedItem.lotNumber}`];
+          if (batchInfo) {
+            transaction.update(batchInfo.ref, {
               currentStock:
-                currentBatchStock + reportedItem.quantityReturnedFull,
+                batchInfo.currentStock + reportedItem.quantityReturnedFull,
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
+            batchInfo.currentStock += reportedItem.quantityReturnedFull;
           }
 
           const kardexRef = adminDb.collection(KARDEX_COLLECTION).doc();
@@ -338,27 +386,53 @@ export const dispatchRepository = {
               referenceType: "ROUTE_RETURN",
               referenceId: manifestId,
               previousStock: currentFilled,
-              newStock: currentFilled + reportedItem.quantityReturnedFull,
+              newStock: newFilledStock,
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
             },
           });
         }
       }
 
-      // 2. PROCESAR RETORNO DE ENVASES VACÍOS
+      // 2. PROCESAR RETORNO DE ENVASES VACÍOS (SOLO LOS NUEVOS DE LA LIQUIDACIÓN)
+      const combinedEmpties = [...(manifestData?.returnedEmpties || [])];
+
       for (const emptyReturn of liquidationData.returnedEmpties) {
         if (emptyReturn.quantityReturned <= 0) continue;
 
         const productRef = adminDb
           .collection(PRODUCTS_COLLECTION)
           .doc(emptyReturn.productId);
-        const productDoc = await transaction.get(productRef);
-        const currentEmpty = productDoc.data()?.stockEmpty || 0;
+
+        // Sumamos SÓLO los nuevos al inventario de la planta
+        const currentEmpty =
+          productDocsMap[emptyReturn.productId]?.stockEmpty || 0;
+        const newEmptyStock = currentEmpty + emptyReturn.quantityReturned;
 
         transaction.update(productRef, {
-          stockEmpty: currentEmpty + emptyReturn.quantityReturned,
+          stockEmpty: newEmptyStock,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
+        productDocsMap[emptyReturn.productId].stockEmpty = newEmptyStock;
+
+        // Sumamos al arreglo combinado para que quede registrado en el Manifiesto final
+        // 🔥 CORRECCIÓN: (e: any) para evitar errores de TypeScript
+        const existingIdx = combinedEmpties.findIndex(
+          (e: any) => e.productId === emptyReturn.productId,
+        );
+
+        if (existingIdx >= 0) {
+          combinedEmpties[existingIdx].quantityReturned =
+            (combinedEmpties[existingIdx].quantityReturned || 0) +
+            emptyReturn.quantityReturned;
+          combinedEmpties[existingIdx].quantity =
+            combinedEmpties[existingIdx].quantityReturned;
+        } else {
+          combinedEmpties.push({
+            productId: emptyReturn.productId,
+            quantityReturned: emptyReturn.quantityReturned,
+            quantity: emptyReturn.quantityReturned,
+          });
+        }
 
         const kardexRef = adminDb.collection(KARDEX_COLLECTION).doc();
         kardexEntries.push({
@@ -368,10 +442,10 @@ export const dispatchRepository = {
             type: "IN",
             phase: "EMPTY",
             quantity: emptyReturn.quantityReturned,
-            referenceType: "EMPTY_RETURN",
+            referenceType: "EMPTY_RETURN_LIQUIDATION",
             referenceId: manifestId,
             previousStock: currentEmpty,
-            newStock: currentEmpty + emptyReturn.quantityReturned,
+            newStock: newEmptyStock,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           },
         });
@@ -380,8 +454,8 @@ export const dispatchRepository = {
       // 3. ACTUALIZAR EL MANIFIESTO A "LIQUIDADO"
       transaction.update(manifestRef, {
         status: "LIQUIDATED",
-        items: updatedItems, // <-- CAMBIADO: Guarda sobre items
-        returnedEmpties: liquidationData.returnedEmpties,
+        items: updatedItems,
+        returnedEmpties: combinedEmpties, // <--- AHORA GUARDAMOS EL COMBINADO (Historia + Nuevos)
         cashReported: liquidationData.cashReported || 0,
         digitalPaymentsReported: liquidationData.digitalPaymentsReported || 0,
         notes: liquidationData.notes
@@ -392,11 +466,18 @@ export const dispatchRepository = {
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // 4. GUARDAR LOS KARDEX
+      // 4. GUARDAR LOS REGISTROS KARDEX ASOCIADOS
       for (const entry of kardexEntries) {
         transaction.set(entry.ref, entry.data);
       }
     });
+
+    // Finalizado el bloque transaccional, ejecutamos la desasignación de pedidos remanentes
+    try {
+      await orderRepository.unassignPendingOrdersFromManifest(manifestId);
+    } catch (error) {
+      console.error("Error desasignando pedidos al liquidar:", error);
+    }
   },
 
   /**
@@ -420,14 +501,48 @@ export const dispatchRepository = {
   },
 
   /**
-   * Ejecuta una "Parada en Pits" (Recarga y Descarga a mitad de ruta)
+   * Igual a getDispatchById, pero con compatibilidad reforzada.
    */
-  async reloadDispatch(
+  async getManifestById(id: string): Promise<DispatchManifest | null> {
+    return this.getDispatchById(id);
+  },
+
+  /**
+   * Obtiene todos los pedidos (Orders) asignados a un manifiesto específico
+   */
+  async getOrdersByManifestId(manifestId: string): Promise<any[]> {
+    const snapshot = await adminDb
+      .collection("orders") // <-- Buscamos en la colección de pedidos
+      .where("manifestId", "==", manifestId)
+      .get();
+
+    return snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        // Serialización segura para Next.js
+        expectedDeliveryDate:
+          data.expectedDeliveryDate?.toDate?.()?.toISOString() || null,
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+        deliveredAt: data.deliveredAt?.toDate?.()?.toISOString() || null,
+      };
+    });
+  },
+
+  /**
+   * PIT STOP AVANZADO: Ejecuta recarga, descarga de mermas/llenos, envases y caja chica.
+   */
+  async advancedReloadDispatch(
     manifestId: string,
     reloadRequest: {
-      newItems: DispatchRequestItem[];
-      returnedEmpties: { productId: string; quantityReturned: number }[];
-      cashAdvance: number;
+      driverId?: string; // <-- Agregado para el cambio de chofer
+      assistantId?: string;
+      newItems: { productId: string; quantityRequested: number }[];
+      returnedEmpties: { productId: string; quantity: number }[];
+      returnedFulls: { productId: string; quantity: number }[];
+      cashHandover: number;
       additionalPettyCash: number;
       notes?: string;
     },
@@ -447,15 +562,19 @@ export const dispatchRepository = {
       const batchUpdates: any[] = [];
       const productUpdates: any[] = [];
 
-      // Usamos el fallback seguro para extraer el arreglo actual
+      // Copia de los items actuales
       const updatedItems = [
         ...(currentManifest.items || currentManifest.loadedItems || []),
       ];
-      const updatedReturnedEmpties = [
+
+      // 🔥 AGREGAR ESTA LÍNEA QUE FALTABA: Copia de los vacíos actuales
+      const updatedReturnedEmpties: any[] = [
         ...(currentManifest.returnedEmpties || []),
       ];
 
-      // 1. PROCESAR RECARGA DE NUEVOS PRODUCTOS (FIFO)
+      // ----------------------------------------------------------------
+      // 1. PROCESAR RECARGA DE NUEVOS PRODUCTOS LLENOS (LÓGICA FIFO)
+      // ----------------------------------------------------------------
       for (const item of reloadRequest.newItems) {
         if (item.quantityRequested <= 0) continue;
 
@@ -500,6 +619,7 @@ export const dispatchRepository = {
             (i) =>
               i.productId === item.productId && i.lotNumber === batch.lotNumber,
           );
+
           if (existingItemIndex >= 0) {
             updatedItems[existingItemIndex].quantityLoaded += takeFromBatch;
           } else {
@@ -546,9 +666,55 @@ export const dispatchRepository = {
         });
       }
 
-      // 2. PROCESAR DESCARGA DE ENVASES VACÍOS
+      // ----------------------------------------------------------------
+      // 2. PROCESAR DESCARGA DE PRODUCTOS LLENOS (Devoluciones anticipadas)
+      // ----------------------------------------------------------------
+      for (const retFull of reloadRequest.returnedFulls) {
+        if (retFull.quantity <= 0) continue;
+
+        const productRef = adminDb
+          .collection(PRODUCTS_COLLECTION)
+          .doc(retFull.productId);
+        const productDoc = await transaction.get(productRef);
+        const currentFilled = productDoc.data()?.stockFilled || 0;
+
+        const existingItemIndex = updatedItems.findIndex(
+          (i) => i.productId === retFull.productId,
+        );
+        if (existingItemIndex >= 0) {
+          updatedItems[existingItemIndex].quantityReturnedFull =
+            (updatedItems[existingItemIndex].quantityReturnedFull || 0) +
+            retFull.quantity;
+        }
+
+        const newFilledStock = currentFilled + retFull.quantity;
+        productUpdates.push({
+          ref: productRef,
+          field: "stockFilled",
+          newValue: newFilledStock,
+        });
+
+        kardexEntries.push({
+          ref: adminDb.collection(KARDEX_COLLECTION).doc(),
+          data: {
+            productId: retFull.productId,
+            type: "IN",
+            phase: "FILLED",
+            quantity: retFull.quantity,
+            referenceType: "DISPATCH_RELOAD_RETURN",
+            referenceId: manifestId,
+            previousStock: currentFilled,
+            newStock: newFilledStock,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+        });
+      }
+
+      // ----------------------------------------------------------------
+      // 3. PROCESAR DESCARGA DE ENVASES VACÍOS (LÓGICA INCREMENTAL)
+      // ----------------------------------------------------------------
       for (const emptyReturn of reloadRequest.returnedEmpties) {
-        if (emptyReturn.quantityReturned <= 0) continue;
+        if (emptyReturn.quantity <= 0) continue;
 
         const productRef = adminDb
           .collection(PRODUCTS_COLLECTION)
@@ -556,31 +722,43 @@ export const dispatchRepository = {
         const productDoc = await transaction.get(productRef);
         const currentEmpty = productDoc.data()?.stockEmpty || 0;
 
+        // A) Sumamos al arreglo interno del manifiesto
         const existingEmptyIndex = updatedReturnedEmpties.findIndex(
           (e) => e.productId === emptyReturn.productId,
         );
         if (existingEmptyIndex >= 0) {
-          updatedReturnedEmpties[existingEmptyIndex].quantityReturned +=
-            emptyReturn.quantityReturned;
+          // Si ya había devuelto de este tipo antes, lo sumamos al total
+          updatedReturnedEmpties[existingEmptyIndex].quantityReturned =
+            (updatedReturnedEmpties[existingEmptyIndex].quantityReturned || 0) +
+            emptyReturn.quantity;
+          updatedReturnedEmpties[existingEmptyIndex].quantity =
+            updatedReturnedEmpties[existingEmptyIndex].quantityReturned;
         } else {
-          updatedReturnedEmpties.push(emptyReturn);
+          // Si es la primera vez que devuelve este tipo, lo agregamos
+          updatedReturnedEmpties.push({
+            productId: emptyReturn.productId,
+            quantityReturned: emptyReturn.quantity,
+            quantity: emptyReturn.quantity,
+          });
         }
 
-        const newEmptyStock = currentEmpty + emptyReturn.quantityReturned;
+        // B) Sumamos al inventario de la Planta
+        const newEmptyStock = currentEmpty + emptyReturn.quantity;
         productUpdates.push({
           ref: productRef,
           field: "stockEmpty",
           newValue: newEmptyStock,
         });
 
+        // C) Inyectamos el movimiento al Kardex
         kardexEntries.push({
           ref: adminDb.collection(KARDEX_COLLECTION).doc(),
           data: {
             productId: emptyReturn.productId,
             type: "IN",
             phase: "EMPTY",
-            quantity: emptyReturn.quantityReturned,
-            referenceType: "EMPTY_RETURN",
+            quantity: emptyReturn.quantity,
+            referenceType: "EMPTY_RETURN_PITSTOP",
             referenceId: manifestId,
             previousStock: currentEmpty,
             newStock: newEmptyStock,
@@ -589,7 +767,9 @@ export const dispatchRepository = {
         });
       }
 
-      // 3. APLICAR TODAS LAS ACTUALIZACIONES
+      // ----------------------------------------------------------------
+      // 4. APLICAR TODAS LAS ACTUALIZACIONES
+      // ----------------------------------------------------------------
       for (const update of batchUpdates) {
         transaction.update(update.ref, {
           currentStock: update.newStock,
@@ -600,11 +780,12 @@ export const dispatchRepository = {
       const combinedProductUpdates: Record<string, any> = {};
       for (const update of productUpdates) {
         const path = update.ref.path;
-        if (!combinedProductUpdates[path])
+        if (!combinedProductUpdates[path]) {
           combinedProductUpdates[path] = {
             ref: update.ref,
             data: { updatedAt: admin.firestore.FieldValue.serverTimestamp() },
           };
+        }
         combinedProductUpdates[path].data[update.field] = update.newValue;
       }
       for (const key in combinedProductUpdates) {
@@ -618,145 +799,47 @@ export const dispatchRepository = {
         transaction.set(entry.ref, entry.data);
       }
 
+      // 🔥 GUARDAMOS EL HISTORIAL DETALLADO DEL PIT STOP
+      const pitStopsHistory = currentManifest.pitStopsHistory || [];
+      pitStopsHistory.push({
+        id: adminDb.collection(KARDEX_COLLECTION).doc().id, // ID único interno
+        createdAt: new Date().toISOString(),
+        driverId: reloadRequest.driverId || currentManifest.driverId,
+        assistantId: reloadRequest.assistantId,
+        cashHandover: reloadRequest.cashHandover || 0,
+        additionalPettyCash: reloadRequest.additionalPettyCash || 0,
+        newItems: reloadRequest.newItems || [],
+        returnedFulls: reloadRequest.returnedFulls || [],
+        returnedEmpties: reloadRequest.returnedEmpties || [],
+        notes: reloadRequest.notes || "",
+      });
+
       const updatedNotes = reloadRequest.notes
         ? `${currentManifest.notes || ""} | PIT STOP: ${reloadRequest.notes}`
         : currentManifest.notes;
 
-      transaction.update(manifestRef, {
-        items: updatedItems, // <-- CAMBIADO: Guarda sobre items
-        returnedEmpties: updatedReturnedEmpties,
+      const manifestUpdates: any = {
+        items: updatedItems,
+        returnedEmpties: updatedReturnedEmpties, // <-- Sobrescrito para no duplicar
         cashAdvances:
-          (currentManifest.cashAdvances || 0) + reloadRequest.cashAdvance,
-        initialPettyCash:
-          (currentManifest.initialPettyCash || 0) +
-          reloadRequest.additionalPettyCash,
+          (currentManifest.cashAdvances || 0) + reloadRequest.cashHandover,
+        additionalPettyCash:
+          (currentManifest.additionalPettyCash || 0) +
+          reloadRequest.additionalPettyCash, // Mantenemos el acumulado separado del inicial
+        pitStopsHistory: pitStopsHistory, // <-- Inyectamos la bitácora
         notes: updatedNotes,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    });
-  },
+      };
 
-  /**
-   * Igual a getDispatchById, pero con compatibilidad reforzada.
-   */
-  async getManifestById(id: string): Promise<DispatchManifest | null> {
-    return this.getDispatchById(id);
-  },
-
-  /**
-   * Liquida un manifiesto (Versión simplificada)
-   */
-  async liquidateManifest(
-    manifestId: string,
-    realCashReceived: number,
-    returnedEmpties: number,
-    returnedFull: number,
-    notes: string,
-  ): Promise<void> {
-    const manifestRef = adminDb.collection(DISPATCH_COLLECTION).doc(manifestId);
-
-    await adminDb.runTransaction(async (transaction) => {
-      const doc = await transaction.get(manifestRef);
-      if (!doc.exists) throw new Error("Manifiesto no encontrado");
-
-      const manifest = doc.data() as any;
-
-      if (manifest.status === "LIQUIDATED") {
-        throw new Error("Este manifiesto ya fue liquidado anteriormente.");
+      if (reloadRequest.driverId) {
+        manifestUpdates.driverId = reloadRequest.driverId;
+      }
+      if (reloadRequest.assistantId !== undefined) {
+        manifestUpdates.assistantId =
+          reloadRequest.assistantId === "" ? null : reloadRequest.assistantId;
       }
 
-      const currentItems = manifest.items || manifest.loadedItems || [];
-      if (currentItems.length === 0)
-        throw new Error("El manifiesto no tiene productos cargados.");
-
-      const firstItem = currentItems[0];
-      const productId = firstItem.productId;
-      const lotNumber = firstItem.lotNumber;
-
-      if (returnedFull > 0) {
-        const productRef = adminDb
-          .collection(PRODUCTS_COLLECTION)
-          .doc(productId);
-        const productDoc = await transaction.get(productRef);
-        const currentFilled = productDoc.data()?.stockFilled || 0;
-
-        transaction.update(productRef, {
-          stockFilled: currentFilled + returnedFull,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        const batchQuery = await transaction.get(
-          adminDb
-            .collection(PRODUCTION_COLLECTION)
-            .where("productId", "==", productId)
-            .where("lotNumber", "==", lotNumber)
-            .limit(1),
-        );
-
-        if (!batchQuery.empty) {
-          const batchRef = batchQuery.docs[0].ref;
-          const currentBatchStock = batchQuery.docs[0].data().currentStock || 0;
-          transaction.update(batchRef, {
-            currentStock: currentBatchStock + returnedFull,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
-
-        const kardexLlenoRef = adminDb.collection(KARDEX_COLLECTION).doc();
-        transaction.set(kardexLlenoRef, {
-          productId,
-          type: "IN",
-          phase: "FILLED",
-          quantity: returnedFull,
-          referenceType: "ROUTE_RETURN",
-          referenceId: manifestId,
-          previousStock: currentFilled,
-          newStock: currentFilled + returnedFull,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-
-      if (returnedEmpties > 0) {
-        const productRef = adminDb
-          .collection(PRODUCTS_COLLECTION)
-          .doc(productId);
-        const productDoc = await transaction.get(productRef);
-        const currentEmpty = productDoc.data()?.stockEmpty || 0;
-
-        transaction.update(productRef, {
-          stockEmpty: currentEmpty + returnedEmpties,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        const kardexVacioRef = adminDb.collection(KARDEX_COLLECTION).doc();
-        transaction.set(kardexVacioRef, {
-          productId,
-          type: "IN",
-          phase: "EMPTY",
-          quantity: returnedEmpties,
-          referenceType: "EMPTY_RETURN",
-          referenceId: manifestId,
-          previousStock: currentEmpty,
-          newStock: currentEmpty + returnedEmpties,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-
-      transaction.update(manifestRef, {
-        status: "LIQUIDATED",
-        realCashReceived,
-        liquidatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        liquidationNotes: notes,
-        items: [
-          {
-            ...firstItem,
-            quantityReturnedEmpty: returnedEmpties,
-            quantityReturnedFull: returnedFull,
-            quantitySold: firstItem.quantityLoaded - returnedFull,
-          },
-        ],
-      });
+      transaction.update(manifestRef, manifestUpdates);
     });
   },
 };

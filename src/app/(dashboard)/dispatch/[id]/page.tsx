@@ -1,10 +1,11 @@
-// src/app/(dashboard)/dispatch/[id]/page.tsx
-
 import { dispatchRepository } from "@/services/repositories/dispatchRepository";
 import { inventoryRepository } from "@/services/repositories/inventoryRepository";
+import { customerRepository } from "@/services/repositories/customerRepository";
 import { adminDb } from "@/services/firebase/admin";
 import { notFound } from "next/navigation";
 import { DispatchDetailsClient } from "./DispatchDetailsClient";
+
+export const dynamic = "force-dynamic";
 
 export default async function DispatchDetailsPage({
   params,
@@ -12,13 +13,11 @@ export default async function DispatchDetailsPage({
   params: Promise<{ id: string }>;
 }) {
   const resolvedParams = await params;
+  const manifestId = resolvedParams.id;
 
-  // 1. Buscamos el Manifiesto
-  const manifest = await dispatchRepository.getDispatchById(resolvedParams.id);
+  const manifest = await dispatchRepository.getDispatchById(manifestId);
   if (!manifest) notFound();
 
-  // SANITIZACIÓN DE FIREBASE PARA NEXT.JS
-  // Convertimos las clases Timestamp de Firebase a strings planos
   const safeManifest = {
     ...manifest,
     liquidatedAt: manifest.liquidatedAt?.toDate
@@ -26,29 +25,58 @@ export default async function DispatchDetailsPage({
       : manifest.liquidatedAt,
   };
 
-  // 2. Buscamos los Productos (Para poder mostrar los nombres en lugar de solo IDs)
   const products = await inventoryRepository.getAllProducts();
 
-  // 3. Buscamos al Chofer Responsable
-  let driverName = "Chofer Desconocido";
-  try {
-    const driverDoc = await adminDb
-      .collection("users")
-      .doc(manifest.driverId)
-      .get();
-    if (driverDoc.exists) {
-      driverName = driverDoc.data()?.name || driverName;
-    }
-  } catch (error) {
-    console.error("Error al obtener chofer:", error);
+  // 🔥 NUEVO: Traemos a TODOS los usuarios para que el Timeline traduzca los IDs a Nombres
+  const usersSnap = await adminDb.collection("users").get();
+  const users = usersSnap.docs.map((doc) => ({
+    id: doc.id,
+    name: doc.data().name || "Sin nombre",
+    role: doc.data().role || "USER",
+  }));
+
+  const driverName =
+    users.find((u) => u.id === manifest.driverId)?.name || "Chofer Desconocido";
+
+  const assignedOrders =
+    await dispatchRepository.getOrdersByManifestId(manifestId);
+
+  const salesSnap = await adminDb
+    .collection("sales")
+    .where("manifestId", "==", manifestId)
+    .get();
+  const sales = salesSnap.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      ...data,
+      createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+      updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+      deliveredAt: data.deliveredAt?.toDate?.()?.toISOString() || null,
+    } as any;
+  });
+
+  const customerIds = Array.from(
+    new Set([
+      ...assignedOrders.map((o) => o.customerId),
+      ...sales.map((s) => s.customerId),
+    ]),
+  );
+  let customersData = {};
+  if (customerIds.length > 0) {
+    customersData = await customerRepository.getCustomersByIds(customerIds);
   }
 
   return (
     <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4 sm:px-6">
       <DispatchDetailsClient
-        manifest={safeManifest} // Pasamos el objeto limpio y serializado
+        manifest={safeManifest}
         products={products}
         driverName={driverName}
+        orders={assignedOrders}
+        customersData={customersData}
+        sales={sales}
+        users={users} // <-- Pasamos los usuarios al cliente
       />
     </div>
   );

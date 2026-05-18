@@ -1,3 +1,4 @@
+// src/app/customers/actions.ts
 "use server";
 
 import { customerRepository } from "@/services/repositories/customerRepository";
@@ -7,6 +8,8 @@ import {
 } from "@/core/validations/crmSchemas";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "crypto";
+// IMPORTANTE: Asegúrate de importar tu configuración de admin
+import { adminStorage } from "@/services/firebase/admin";
 
 export async function saveCustomerAction(
   data: CustomerFormValues,
@@ -16,11 +19,42 @@ export async function saveCustomerAction(
     // 1. Validación estricta con Zod
     const parsedData = customerSchema.parse(data);
 
-    // 2. Garantizar que toda ubicación tenga un ID único antes de ir a BD
-    const locationsWithIds = parsedData.locations.map((loc) => ({
-      ...loc,
-      id: loc.id || randomUUID(), // Genera un ID si viene undefined del formulario
-    }));
+    // 2. Garantizar ID único y SUBIR IMÁGENES AL STORAGE
+    const bucketName = process.env.FIREBASE_STORAGE_BUCKET;
+    if (!bucketName)
+      throw new Error("Falta definir FIREBASE_STORAGE_BUCKET en el .env");
+    const bucket = adminStorage.bucket(bucketName);
+
+    const locationsWithIds = await Promise.all(
+      parsedData.locations.map(async (loc) => {
+        let finalImageUrl = loc.imageUrl;
+
+        // Si la imagen viene en Base64 desde el formulario (comprimida)
+        if (finalImageUrl && finalImageUrl.startsWith("data:image")) {
+          // Extraemos la data cruda quitando el prefijo
+          const base64Data = finalImageUrl.split(",")[1];
+          const buffer = Buffer.from(base64Data, "base64");
+
+          // Generamos un nombre único en la carpeta de Storage
+          const fileName = `customers/locations/${randomUUID()}.jpg`;
+          const file = bucket.file(fileName);
+
+          // Subimos el archivo
+          await file.save(buffer, {
+            metadata: { contentType: "image/jpeg" },
+          });
+
+          // Reemplazamos el Base64 por la ruta limpia del archivo
+          finalImageUrl = fileName;
+        }
+
+        return {
+          ...loc,
+          imageUrl: finalImageUrl,
+          id: loc.id || randomUUID(), // Genera un ID si viene undefined del formulario
+        };
+      }),
+    );
 
     // Preparamos la data limpia que coincide exactamente con la Entidad
     const dataToSave = {

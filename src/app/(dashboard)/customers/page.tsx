@@ -3,11 +3,13 @@ import { CustomerTable } from "./CustomerTable";
 import { Button } from "@/components/ui/button";
 import { Plus, Users } from "lucide-react";
 import Link from "next/link";
+import { inventoryRepository } from "@/services/repositories/inventoryRepository";
 
 export const dynamic = "force-dynamic";
 
 export default async function CustomersPage() {
-  const customers = await customerRepository.getAllCustomers();
+  const initialCustomers = await customerRepository.getInitialCustomers(100);
+  const products = await inventoryRepository.getAllProducts();
 
   return (
     <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4 sm:px-6 space-y-8">
@@ -34,7 +36,7 @@ export default async function CustomersPage() {
       </div>
 
       {/* COMPONENTE DE TABLA CON FILTROS */}
-      <CustomerTable customers={customers} />
+      <CustomerTable initialCustomers={initialCustomers} products={products} />
     </div>
   );
 }

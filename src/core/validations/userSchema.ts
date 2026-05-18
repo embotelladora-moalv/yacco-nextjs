@@ -9,6 +9,8 @@ export const userSchema = z.object({
     .min(1, "Debe seleccionar al menos un rol"),
   phone: z.string().optional(),
   // Hacemos la contraseña opcional en el esquema para que al editar no sea obligatoria
+  licenseNumber: z.string().nullish(),
+  documentNumber: z.string().nullish(),
   password: z
     .string()
     .min(6, "Mínimo 6 caracteres")

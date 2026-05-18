@@ -10,6 +10,8 @@ export interface User {
   name: string;
   email: string;
   roles: UserRole[]; // <-- CAMBIO CLAVE: Ahora es un array  phone?: string;
+  licenseNumber?: string; // <-- Nuevo campo para número de licencia (opcional)
+  documentNumber?: string; // <-- Nuevo campo para número de licencia (opcional)
 
   // Para transportistas, vinculamos opcionalmente a un camión
   truckId?: string;

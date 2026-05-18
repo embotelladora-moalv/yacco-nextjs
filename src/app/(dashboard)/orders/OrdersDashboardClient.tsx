@@ -16,15 +16,12 @@ import {
   MapPin,
   Clock,
   Truck,
-  Package,
   CheckCircle2,
-  ArrowRight,
   User,
-  Phone,
   CheckSquare,
   Edit,
-  ListPlus,
   Trash2,
+  FileBadge2, // <-- Icono para la guía
 } from "lucide-react";
 import Link from "next/link";
 
@@ -44,6 +41,9 @@ export function OrdersDashboardClient({
   const [isAssigning, setIsAssigning] = useState(false);
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
   const [bulkManifestId, setBulkManifestId] = useState("");
+
+  // 🔥 NUEVO ESTADO: ¿Generar guías para estos pedidos al asignar?
+  const [generateGuides, setGenerateGuides] = useState(false);
 
   const getCustomerData = (customerId: string, locationId: string) => {
     const customer = customers.find((c) => c.id === customerId);
@@ -67,10 +67,8 @@ export function OrdersDashboardClient({
 
   const handleSelectAll = () => {
     if (selectedOrders.length === pendingOrders.length) {
-      // Si ya están todos seleccionados, los deseleccionamos
       setSelectedOrders([]);
     } else {
-      // Seleccionamos todos los IDs
       setSelectedOrders(pendingOrders.map((o) => o.id));
     }
   };
@@ -78,13 +76,23 @@ export function OrdersDashboardClient({
   const handleBulkAssign = async () => {
     if (!bulkManifestId || selectedOrders.length === 0) return;
     setIsAssigning(true);
-    const result = await assignOrdersBulkAction(selectedOrders, bulkManifestId);
+
+    // 🔥 ENVIAMOS EL NUEVO PARÁMETRO AL ACTION
+    const result = await assignOrdersBulkAction(
+      selectedOrders,
+      bulkManifestId,
+      generateGuides,
+    );
     setIsAssigning(false);
 
     if (result.success) {
-      toast.success(`${selectedOrders.length} pedidos asignados exitosamente.`);
-      setSelectedOrders([]); // Limpiar selección
+      toast.success(`${selectedOrders.length} pedidos asignados al camión.`);
+      if (generateGuides)
+        toast.success("Las guías (GRE) se están generando en segundo plano.");
+
+      setSelectedOrders([]);
       setBulkManifestId("");
+      setGenerateGuides(false);
     } else {
       toast.error("Error en asignación masiva", { description: result.error });
     }
@@ -93,13 +101,12 @@ export function OrdersDashboardClient({
   const handleDelete = async (id: string) => {
     if (
       window.confirm(
-        "¿Estás seguro de que deseas eliminar este pedido por completo? Esta acción no se puede deshacer.",
+        "¿Estás seguro de que deseas eliminar este pedido por completo?",
       )
     ) {
       const result = await deleteOrderAction(id);
       if (result.success) {
         toast.success("Pedido eliminado.");
-        // Si estaba seleccionado en la asignación masiva, lo quitamos
         setSelectedOrders((prev) => prev.filter((orderId) => orderId !== id));
       } else {
         toast.error("Error al eliminar", { description: result.error });
@@ -121,7 +128,6 @@ export function OrdersDashboardClient({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* COLUMNA IZQUIERDA: LISTA DE PEDIDOS */}
       <div className="lg:col-span-2 space-y-4">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex items-center gap-4">
@@ -130,7 +136,6 @@ export function OrdersDashboardClient({
               {pendingOrders.length})
             </h2>
 
-            {/* BOTÓN MAESTRO: SELECCIONAR TODO */}
             {pendingOrders.length > 0 && (
               <button
                 onClick={handleSelectAll}
@@ -148,50 +153,77 @@ export function OrdersDashboardClient({
             )}
           </div>
 
-          {/* BARRA DE ASIGNACIÓN MASIVA (Aparece si hay seleccionados) */}
+          {/* 🔥 BARRA DE ASIGNACIÓN MASIVA ACTUALIZADA CON SWITCH DE GUÍA */}
           {selectedOrders.length > 0 && (
-            <div className="bg-blue-50 border border-blue-200 p-2 rounded-xl flex items-center gap-3 animate-in fade-in zoom-in duration-200 w-full sm:w-auto">
-              <span className="text-xs font-black text-blue-800 ml-2">
-                {selectedOrders.length} Seleccionados
-              </span>
-              <select
-                value={bulkManifestId}
-                onChange={(e) => setBulkManifestId(e.target.value)}
-                className="h-9 px-2 rounded-lg border border-blue-200 text-sm font-bold bg-white min-w-[150px]"
-              >
-                <option value="">A qué camión...</option>
-                {activeManifests.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.truckPlate}
-                  </option>
-                ))}
-              </select>
-              <Button
-                onClick={handleBulkAssign}
-                disabled={isAssigning || !bulkManifestId}
-                size="sm"
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-9"
-              >
-                {isAssigning ? "Asignando..." : "Asignar Todos"}
-              </Button>
+            <div className="bg-blue-50 border border-blue-200 p-3 rounded-xl flex flex-col sm:flex-row items-center gap-4 animate-in fade-in zoom-in duration-200 w-full sm:w-auto">
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <span className="text-xs font-black text-blue-800 whitespace-nowrap">
+                  {selectedOrders.length} Seleccionados
+                </span>
+
+                <select
+                  value={bulkManifestId}
+                  onChange={(e) => setBulkManifestId(e.target.value)}
+                  className="h-10 px-3 rounded-lg border border-blue-200 text-sm font-bold bg-white w-full sm:w-auto"
+                >
+                  <option value="">A qué camión...</option>
+                  {activeManifests.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.truckPlate}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-4 w-full sm:w-auto justify-between border-t sm:border-t-0 sm:border-l border-blue-200 pt-3 sm:pt-0 sm:pl-4">
+                {/* Switch de SUNAT */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={generateGuides}
+                      onChange={(e) => setGenerateGuides(e.target.checked)}
+                    />
+                    <div
+                      className={`block w-10 h-6 rounded-full transition-colors ${generateGuides ? "bg-orange-500" : "bg-slate-300"}`}
+                    ></div>
+                    <div
+                      className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${generateGuides ? "transform translate-x-4" : ""}`}
+                    ></div>
+                  </div>
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                    <FileBadge2 className="h-3 w-3 text-orange-500" /> Emitir
+                    Guías
+                  </span>
+                </label>
+
+                <Button
+                  onClick={handleBulkAssign}
+                  disabled={isAssigning || !bulkManifestId}
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-10 px-6"
+                >
+                  {isAssigning ? "Asignando..." : "Despachar"}
+                </Button>
+              </div>
             </div>
           )}
         </div>
 
         <div className="space-y-4">
+          {/* ... EL RESTO DEL CÓDIGO DEL BUCLE DE PEDIDOS SE MANTIENE IGUAL ... */}
           {pendingOrders.map((order) => {
             const { customer, location } = getCustomerData(
               order.customerId,
               order.locationId,
             );
             const isSelected = selectedOrders.includes(order.id);
-
             return (
               <div
                 key={order.id}
                 className={`bg-white rounded-2xl border ${isSelected ? "border-blue-500 ring-1 ring-blue-500 shadow-md" : "border-slate-200 shadow-sm"} p-5 flex flex-col md:flex-row gap-6 transition-all`}
               >
-                {/* Checkbox de Selección Masiva */}
                 <div className="flex items-start pt-1">
                   <button
                     onClick={() => toggleOrderSelection(order.id)}
@@ -200,7 +232,6 @@ export function OrdersDashboardClient({
                     {isSelected && <CheckSquare className="h-4 w-4" />}
                   </button>
                 </div>
-
                 <div className="flex-1 space-y-3">
                   <div className="flex justify-between items-start">
                     <div>
@@ -212,7 +243,6 @@ export function OrdersDashboardClient({
                       </p>
                     </div>
                   </div>
-
                   <div className="flex items-start gap-2 text-sm text-slate-600">
                     <MapPin className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
                     <div>
@@ -220,7 +250,6 @@ export function OrdersDashboardClient({
                     </div>
                   </div>
                 </div>
-
                 <div className="md:w-64 flex flex-col justify-between border-t md:border-t-0 md:border-l border-slate-100 pt-4 md:pt-0 md:pl-6">
                   <div className="space-y-2 mb-4">
                     <ul className="text-xs font-medium text-slate-500 space-y-1">
@@ -237,8 +266,6 @@ export function OrdersDashboardClient({
                       ))}
                     </ul>
                   </div>
-
-                  {/* Botón de Edición Individual */}
                   <div className="mt-auto flex justify-end items-center gap-2">
                     <Button
                       variant="ghost"
@@ -248,7 +275,6 @@ export function OrdersDashboardClient({
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
-
                     <Button
                       variant="ghost"
                       size="sm"
@@ -267,9 +293,7 @@ export function OrdersDashboardClient({
         </div>
       </div>
 
-      {/* COLUMNA DERECHA: RUTAS */}
       <div className="space-y-4">
-        {/* ... (se mantiene igual que la versión anterior) */}
         <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
           <Truck className="h-5 w-5 text-blue-500" /> Rutas Activas
         </h2>

@@ -71,3 +71,42 @@ export const reloadManifestSchema = z.object({
 });
 
 export type ReloadManifestFormValues = z.infer<typeof reloadManifestSchema>;
+
+export const advancedPitStopSchema = z.object({
+  driverId: z.string().min(1, "El camión debe tener un chofer asignado"), // 🔥 NUEVO
+  assistantId: z.string().optional(),
+
+  cashHandover: z.coerce.number().min(0).default(0),
+  additionalPettyCash: z.coerce.number().min(0).default(0),
+
+  returnedEmpties: z
+    .array(
+      z.object({
+        productId: z.string().min(1, "Seleccione producto"),
+        quantity: z.coerce.number().min(1, "Mínimo 1"),
+      }),
+    )
+    .default([]),
+
+  returnedFulls: z
+    .array(
+      z.object({
+        productId: z.string().min(1, "Seleccione producto"),
+        quantity: z.coerce.number().min(1, "Mínimo 1"),
+      }),
+    )
+    .default([]),
+
+  newItems: z
+    .array(
+      z.object({
+        productId: z.string().min(1, "Seleccione producto"),
+        quantityRequested: z.coerce.number().min(1, "Mínimo 1"),
+      }),
+    )
+    .default([]),
+
+  notes: z.string().optional(),
+});
+
+export type AdvancedPitStopFormValues = z.infer<typeof advancedPitStopSchema>;

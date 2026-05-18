@@ -1,5 +1,3 @@
-// src/app/(dashboard)/dispatch/actions.ts
-
 "use server";
 
 import { dispatchRepository } from "@/services/repositories/dispatchRepository";
@@ -8,8 +6,8 @@ import {
   DispatchManifestFormValues,
   LiquidationManifestFormValues,
   liquidationManifestSchema,
-  ReloadManifestFormValues,
-  reloadManifestSchema,
+  AdvancedPitStopFormValues,
+  advancedPitStopSchema,
 } from "@/core/validations/dispatchSchemas";
 import { revalidatePath } from "next/cache";
 
@@ -84,50 +82,25 @@ export async function liquidateDispatchAction(
   }
 }
 
-export async function reloadDispatchAction(
+export async function advancedReloadDispatchAction(
   manifestId: string,
-  data: ReloadManifestFormValues,
+  data: AdvancedPitStopFormValues,
 ) {
   try {
-    const parsed = reloadManifestSchema.parse(data);
-    await dispatchRepository.reloadDispatch(manifestId, parsed);
+    // 1. Validación estricta con Zod
+    const parsedData = advancedPitStopSchema.parse(data);
 
+    // 2. Ejecutar lógica transaccional del Pit Stop
+    await dispatchRepository.advancedReloadDispatch(manifestId, parsedData);
+
+    // 3. Limpiar caché para refrescar la interfaz
     revalidatePath("/dispatch");
     revalidatePath(`/dispatch/${manifestId}`);
-    revalidatePath("/inventory");
+    revalidatePath(`/dispatch/${manifestId}/pit-stop`);
 
     return { success: true };
   } catch (error: any) {
-    console.error("Error en Parada en Pits:", error);
-    return { success: false, error: error.message };
-  }
-}
-
-export async function liquidateManifestAction(
-  manifestId: string,
-  realCashReceived: number,
-  returnedEmpties: number,
-  returnedFull: number,
-  notes: string,
-) {
-  try {
-    await dispatchRepository.liquidateManifest(
-      manifestId,
-      realCashReceived,
-      returnedEmpties,
-      returnedFull,
-      notes,
-    );
-
-    revalidatePath("/dispatch");
-    revalidatePath(`/dispatch/${manifestId}`);
-
-    // ¡AQUÍ ESTABA EL BUG! Esto es lo que hacía que no vieras el retorno
-    // de bidones en tu pantalla del Inventario.
-    revalidatePath("/inventory");
-
-    return { success: true };
-  } catch (error: any) {
+    console.error("Error en Pit Stop Avanzado:", error);
     return { success: false, error: error.message };
   }
 }
