@@ -3,7 +3,6 @@
 import { useState } from "react";
 import {
   Truck,
-  FileText,
   FileCode,
   Archive,
   AlertCircle,
@@ -92,7 +91,19 @@ export default function GrePanel({
   const getStorageUrl = (url?: string) => {
     if (!url) return "#";
     if (url.startsWith("http")) return url;
-    return `https://firebasestorage.googleapis.com/v0/b/${process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(url)}?alt=media`;
+
+    const bucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
+    const encodedPath = encodeURIComponent(url);
+
+    // Si estás corriendo en local (Next.js development mode)
+    if (process.env.NODE_ENV === "development") {
+      // URL del Firebase Storage Emulator (puerto 9199 por defecto)
+      // Nota: Usamos 127.0.0.1 en lugar de localhost para evitar problemas de CORS o IPv6
+      return `http://127.0.0.1:9199/v0/b/${bucket}/o/${encodedPath}?alt=media`;
+    }
+
+    // URL de Producción (Google Cloud Storage)
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media`;
   };
 
   return (

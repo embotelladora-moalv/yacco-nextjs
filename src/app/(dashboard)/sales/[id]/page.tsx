@@ -49,6 +49,14 @@ export default async function SaleDetailPage({ params }: PageProps) {
   const getStorageUrl = (path?: string) => {
     if (!path) return "#";
     if (path.startsWith("http")) return path;
+
+    // Si estás corriendo en local (Next.js development mode)
+    if (process.env.NODE_ENV === "development") {
+      // URL del Firebase Storage Emulator (puerto 9199 por defecto)
+      // Nota: Usamos 127.0.0.1 en lugar de localhost para evitar problemas de CORS o IPv6
+      return `http://127.0.0.1:9199/v0/b/${process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(path)}?alt=media`;
+    }
+
     return `https://firebasestorage.googleapis.com/v0/b/${process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(path)}?alt=media`;
   };
 

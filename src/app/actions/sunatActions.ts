@@ -13,6 +13,7 @@ import {
   getGreTicketStatusRest,
   sendGuiaToSunatRest,
 } from "@/services/sunat/apiSunatRest";
+import { generateInvoicePdf } from "@/services/sunat/pdfGenerator";
 
 /**
  * EMISIÓN: Genera una Factura o Boleta consolidando uno o varios pedidos (sales)
@@ -132,8 +133,22 @@ export async function emitirComprobanteAction(
         .save(cdrBuffer, { contentType: "application/zip" });
     }
 
-    // [AQUÍ] En el futuro cercano, llamarás a tu función generadora de PDF:
-    // await generateInvoicePdf(invoiceInfo, pdfPath);
+    // 6.5 GENERAR Y GUARDAR EL PDF
+    try {
+      // Pasamos invoiceInfo y el signedXml (para que extraiga el Hash y genere el QR)
+      const pdfBuffer = await generateInvoicePdf(invoiceInfo, signedXml);
+
+      // Guardamos el Buffer en Firebase Storage
+      await bucket
+        .file(pdfPath)
+        .save(pdfBuffer, { contentType: "application/pdf" });
+
+      console.log("✅ PDF generado y guardado exitosamente");
+    } catch (pdfError) {
+      // Usamos un try/catch interno para que, si el PDF falla por formato,
+      // no anule el registro de la factura que YA fue aceptada por SUNAT.
+      console.error("⚠️ Error generando el PDF:", pdfError);
+    }
 
     // 7. REGISTRAR COMPROBANTE TRIBUTARIO EN FIRESTORE
     await adminDb.collection("sunatDocuments").doc(documentId).set({
@@ -497,7 +512,7 @@ export async function emitirGuiaRemisionAction(
 
     // 2. Calcular Peso Total Estimado
     const pesoTotalKilos = saleData.items.reduce((acc: number, item: any) => {
-      return acc + item.quantity * 21; // 21 kilos aprox por bidón
+      return acc + item.quantity * 20; // 21 kilos aprox por bidón
     }, 0);
 
     // 3. Generar el Correlativo de la Guía (Serie T001)
@@ -506,18 +521,22 @@ export async function emitirGuiaRemisionAction(
     const documentId = `${serie}-${correlativo}`;
     const fileName = `${RUC_EMPRESA}-09-${documentId}`;
 
-    const issueDate = new Date();
+    const now = new Date();
+    const issueDate = "2026-05-19";
+    const issueTime = now.toTimeString().split(" ")[0]; // "21:39:52"
 
     // 4. Estructurar la Data para el Generador XML
     const guiaInfo = {
       documentId: documentId,
-      issueDate: issueDate.toISOString().split("T")[0],
-      issueTime: issueDate.toTimeString().split(" ")[0],
+      issueDate: issueDate,
+      issueTime: issueTime,
       customerDocument: customerData.documentNumber,
       customerName: customerData.name || customerData.fullName,
       motivoTraslado: "01", // 01 = Venta
       pesoTotalKilos: pesoTotalKilos,
       driverDni: driverData.documentNumber,
+      driverName: driverData.name || driverData.fullName,
+      driverLicense: driverData.licenseNumber || "LICENCIA123",
       vehiclePlate: truckData.plateNumber,
       ubigeoLlegada: location.ubigeo,
       direccionLlegada: location.address,
@@ -582,10 +601,40 @@ export async function consultarTicketGreAction(documentId: string) {
     }
 
     if (response.status === "99") {
+      let errorMessage = response.error || "Error desconocido";
+
+      // 🔍 EL SECRETO: SUNAT esconde el error real dentro del ZIP del CDR
+      if (response.cdrZipBase64) {
+        try {
+          const zipData = await JSZip.loadAsync(
+            Buffer.from(response.cdrZipBase64, "base64"),
+          );
+
+          // Buscar el archivo XML de respuesta dentro del ZIP (suele llamarse R-206...xml)
+          const xmlFilename = Object.keys(zipData.files).find((name) =>
+            name.endsWith(".xml"),
+          );
+
+          if (xmlFilename) {
+            const xmlContent = await zipData.file(xmlFilename)!.async("string");
+
+            // Extraer la descripción del error usando una expresión regular
+            const descriptionMatch = xmlContent.match(
+              /<cbc:Description>(.*?)<\/cbc:Description>/,
+            );
+            if (descriptionMatch && descriptionMatch[1]) {
+              errorMessage = descriptionMatch[1];
+            }
+          }
+        } catch (e) {
+          console.error("No se pudo extraer el error del CDR ZIP", e);
+        }
+      }
+
       await sunatDocRef.update({ status: "REJECTED" });
-      throw new Error(
-        `SUNAT rechazó la Guía: ${response.error || "Error desconocido"}`,
-      );
+
+      // Ahora el error mostrará exactamente lo que SUNAT está reclamando
+      throw new Error(`SUNAT rechazó la Guía: ${errorMessage}`);
     }
 
     if (response.status === "0") {

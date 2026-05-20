@@ -40,6 +40,7 @@ export async function sendInvoiceToSunat(fileName: string, signedXml: string) {
 
   // 3. Enviar a SUNAT (Usamos el entorno BETA para pruebas)
   // Cuando pases a producción, esta URL cambia a: https://e-factura.sunat.gob.pe/ol-ti-itcpfegem/billService
+  // Cuando pases a producción, esta URL cambia a: "https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService
   const endpoint =
     "https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService";
 
