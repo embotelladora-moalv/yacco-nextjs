@@ -15,6 +15,17 @@ import {
 } from "@/services/sunat/apiSunatRest";
 import { generateInvoicePdf } from "@/services/sunat/pdfGenerator";
 
+import { EmitirComprobanteUseCase } from "@/core/use-cases/billing/EmitirComprobanteUseCase";
+import { FirestoreSaleRepository } from "@/services/adapters/FirestoreSaleRepository";
+import { FirestoreCustomerRepository } from "@/services/adapters/FirestoreCustomerRepository";
+import { FirestoreProductRepository } from "@/services/adapters/FirestoreProductRepository";
+import { FirestoreBillingRepository } from "@/services/adapters/FirestoreBillingRepository";
+import { SunatCorrelativeService } from "@/services/adapters/SunatCorrelativeService";
+import { SunatSoapClient } from "@/services/adapters/SunatSoapClient";
+import { FirebaseFileStorage } from "@/services/adapters/FirebaseFileStorage";
+import { SunatPdfService } from "@/services/adapters/SunatPdfService";
+import { revalidatePath } from "next/cache";
+
 /**
  * EMISIÓN: Genera una Factura o Boleta consolidando uno o varios pedidos (sales)
  */
@@ -24,169 +35,35 @@ export async function emitirComprobanteAction(
   tipoDocumento: "01" | "03",
 ) {
   try {
-    const RUC_EMPRESA = process.env.SUNAT_RUC || "20612769151";
-    let customerId = "";
-
-    let totalAmount = 0;
-    const consolidatedItems: any[] = [];
-    const guiasAsociadas: string[] = [];
-
-    // Si nos envían un solo ID como string, lo envolvemos en un Array para estandarizar el flujo
     const idsToProcess = Array.isArray(saleIds) ? saleIds : [saleIds];
 
-    // 1. ITERAR Y CONSOLIDAR TODAS LAS VENTAS SELECCIONADAS
-    for (const saleId of idsToProcess) {
-      const saleDoc = await adminDb.collection("sales").doc(saleId).get();
-      if (!saleDoc.exists) throw new Error(`Venta ${saleId} no encontrada`);
-      const saleData = saleDoc.data() as any;
+    const useCase = new EmitirComprobanteUseCase(
+      new FirestoreSaleRepository(),
+      new FirestoreCustomerRepository(),
+      new FirestoreProductRepository(),
+      new FirestoreBillingRepository(),
+      new SunatCorrelativeService(),
+      new SunatSoapClient(),
+      new FirebaseFileStorage(),
+      new SunatPdfService(),
+    );
 
-      // Validar que todas las ventas pertenezcan al mismo cliente
-      if (!customerId) customerId = saleData.customerId;
-      if (customerId !== saleData.customerId) {
-        throw new Error("No puedes consolidar ventas de diferentes clientes.");
-      }
-
-      totalAmount += saleData.totalAmount;
-
-      // Agrupar productos de los tickets
-      for (const item of saleData.items) {
-        const productDoc = await adminDb
-          .collection("products")
-          .doc(item.productId)
-          .get();
-        const productData = productDoc.data();
-
-        consolidatedItems.push({
-          ...item,
-          // Alimenta la descripción real para el generador UBL 2.1
-          description: productData?.name || "Bidón de Agua Moalv",
-        });
-      }
-
-      // 2. BUSCAR SI ESTA VENTA TIENE UNA GUÍA DE REMISIÓN (GRE) APROBADA
-      const greSnapshot = await adminDb
-        .collection("sunatDocuments")
-        .where("saleId", "==", saleId)
-        .where("type", "==", "09")
-        .where("status", "==", "ACCEPTED")
-        .get();
-
-      if (!greSnapshot.empty) {
-        guiasAsociadas.push(greSnapshot.docs[0].id);
-      }
-    }
-
-    // 3. OBTENER DATOS DEL CLIENTE
-    const customerDoc = await adminDb
-      .collection("customers")
-      .doc(customerId)
-      .get();
-    if (!customerDoc.exists) throw new Error("Cliente no encontrado en el CRM");
-    const customerData = customerDoc.data() as any;
-
-    // 4. GENERAR CORRELATIVO ÚNICO DE SUNAT (Serie F001 o B001)
-    const serie = tipoDocumento === "01" ? "F001" : "B001";
-    const correlativo = await getNextSequence(serie);
-    const documentId = `${serie}-${correlativo}`;
-    const fileName = `${RUC_EMPRESA}-${tipoDocumento}-${documentId}`;
-
-    // Estructurar la data exacta para el generador XML (UBL 2.0)
-    const invoiceInfo = {
-      documentId,
-      documentType: tipoDocumento,
-      totalAmount,
-      customerDocument: customerData.documentNumber,
-      customerName: customerData.name || customerData.fullName,
-      items: consolidatedItems,
-      guiasAsociadas,
-      issueDate: new Date().toISOString().split("T")[0],
-    };
-
-    // 5. GENERAR XML, FIRMAR Y ENVIAR A SUNAT (PROCESO SOAP)
-    const rawXml = buildInvoiceXml(invoiceInfo);
-    const signedXml = signXml(rawXml); // Firma digital
-    // const signedXml = rawXml; // ← Envía sin firma temporalmente
-
-    // El método sendInvoiceToSunat envía a SUNAT/OSE y retorna el CDR en Base64 si fue aprobado
-    const cdrZipBase64 = await sendInvoiceToSunat(fileName, signedXml);
-
-    // 6. DEFINIR LAS RUTAS EXACTAS DE ALMACENAMIENTO EN STORAGE
-    const xmlPath = `sunat/xml/facturas/${fileName}.xml`;
-    const cdrPath = `sunat/cdr/facturas/R-${fileName}.zip`;
-    const pdfPath = `sunat/pdf/facturas/${fileName}.pdf`; // Ruta donde se guardará tu PDF
-
-    const bucketName = process.env.FIREBASE_STORAGE_BUCKET;
-    if (!bucketName)
-      throw new Error("Falta definir FIREBASE_STORAGE_BUCKET en el .env");
-    const bucket = adminStorage.bucket(bucketName);
-
-    // Guardar el XML firmado en Firebase Storage
-    await bucket
-      .file(xmlPath)
-      .save(signedXml, { contentType: "application/xml" });
-
-    // Guardar el CDR devuelto por SUNAT en Firebase Storage
-    if (cdrZipBase64) {
-      const cdrBuffer = Buffer.from(cdrZipBase64, "base64");
-      await bucket
-        .file(cdrPath)
-        .save(cdrBuffer, { contentType: "application/zip" });
-    }
-
-    // 6.5 GENERAR Y GUARDAR EL PDF
-    try {
-      // Pasamos invoiceInfo y el signedXml (para que extraiga el Hash y genere el QR)
-      const pdfBuffer = await generateInvoicePdf(invoiceInfo, signedXml);
-
-      // Guardamos el Buffer en Firebase Storage
-      await bucket
-        .file(pdfPath)
-        .save(pdfBuffer, { contentType: "application/pdf" });
-
-      console.log("✅ PDF generado y guardado exitosamente");
-    } catch (pdfError) {
-      // Usamos un try/catch interno para que, si el PDF falla por formato,
-      // no anule el registro de la factura que YA fue aceptada por SUNAT.
-      console.error("⚠️ Error generando el PDF:", pdfError);
-    }
-
-    // 7. REGISTRAR COMPROBANTE TRIBUTARIO EN FIRESTORE
-    await adminDb.collection("sunatDocuments").doc(documentId).set({
-      id: documentId,
-      saleIds: idsToProcess, // Almacenamos el array para saber qué ventas cubre este documento
-      type: tipoDocumento,
-      status: "ACCEPTED",
-      xmlUrl: xmlPath,
-      cdrUrl: cdrPath,
-      pdfUrl: pdfPath, // Guardamos la referencia para el PDF
-      createdAt: new Date(),
+    const result = await useCase.execute({
+      saleIds: idsToProcess,
+      tipoDocumento,
     });
 
-    // 8. ACTUALIZACIÓN MASIVA DE LAS VENTAS AFECTADAS (BATCH ATÓMICO)
-    const batch = adminDb.batch();
-    for (const saleId of idsToProcess) {
-      const saleRef = adminDb.collection("sales").doc(saleId);
-      batch.update(saleRef, {
-        isBilled: true,
-        sunatDocumentId: documentId,
-        updatedAt: new Date(),
-      });
+    if (result.success) {
+      revalidatePath("/(dashboard)/billing", "layout");
     }
-    await batch.commit();
 
-    // 9. RETORNAR LAS DIRECCIONES DE DESCARGA DIRECTAS PARA LA UI
-    return {
-      success: true,
-      documentId,
-      xmlUrl: xmlPath,
-      cdrUrl: cdrPath,
-      pdfUrl: pdfPath,
-    };
+    return result;
   } catch (error: any) {
-    console.error("Error en el proceso de facturación:", error);
+    console.error("Error en emitirComprobanteAction:", error);
     return { success: false, error: error.message };
   }
 }
+
 
 /**
  * ANULACIÓN PASO 1: Genera el XML de Baja, lo firma y obtiene el TICKET de SUNAT
