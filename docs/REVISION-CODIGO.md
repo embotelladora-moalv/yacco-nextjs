@@ -66,26 +66,15 @@ hay tres opciones:
 
 ---
 
-## 🔴 BUG-04 — Endpoint `/api/seed` público y destructivo
+## ✅ BUG-04 — Endpoint `/api/seed` protegido (SOLUCIONADO)
 
 **Archivo**: `src/app/api/seed/route.ts`
 
-`GET /api/seed` no tiene autenticación y crea datos en producción
-(productos, clientes, etc.). Si está desplegado:
+Se han implementado las siguientes protecciones:
+- Bloqueo total en producción (`NODE_ENV === "production"` retorna 404).
+- Validación de header `x-seed-token` contra la variable de entorno `SEED_TOKEN`.
+- Documentación en `docs/README.md` y `.env.example`.
 
-```
-curl https://tu-dominio.com/api/seed
-```
-
-cualquiera puede insertar registros y posiblemente sobrescribir IDs
-existentes.
-
-**Fix**:
-- Mínimo: validar `process.env.NODE_ENV === "development"` y rechazar
-  en producción.
-- Mejor: validar un header secreto (`x-seed-token`) contra una variable
-  de entorno.
-- Ideal: mover seeders a un script CLI fuera de la app (`scripts/seed.ts`).
 
 ---
 

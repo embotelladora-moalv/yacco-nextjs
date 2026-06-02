@@ -126,7 +126,6 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 | Bug | Archivo | Qué hay que hacer |
 |---|---|---|
 | **BUG-03** | `functions/src/index.ts` | El worker `processSunatQueue` simula con `setTimeout`. Hay que llamar a los servicios SUNAT reales. |
-| **BUG-04** | `src/app/api/seed/route.ts` | Endpoint público sin auth. Bloquear en producción + token en dev. |
 
 ### Deuda relevante
 

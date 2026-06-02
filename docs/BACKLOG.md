@@ -59,10 +59,10 @@ aceptación claros y una estimación en **Story Points** (escala Fibonacci:
 **para** evitar que terceros inserten datos en la base de producción.
 
 **Criterios de aceptación**:
-- [ ] El endpoint responde 404 (o 403) si `NODE_ENV === "production"`.
-- [ ] En desarrollo exige header `x-seed-token` que matchee
+- [x] El endpoint responde 404 (o 403) si `NODE_ENV === "production"`.
+- [x] En desarrollo exige header `x-seed-token` que matchee
       `SEED_TOKEN` en `.env`.
-- [ ] Se documenta el proceso de seed local en el README.
+- [x] Se documenta el proceso de seed local en el README.
 
 **Estimación**: 2 SP — **Prioridad**: P0 — **Ref**: BUG-04
 
