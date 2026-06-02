@@ -522,7 +522,7 @@ export async function emitirGuiaRemisionAction(
     const fileName = `${RUC_EMPRESA}-09-${documentId}`;
 
     const now = new Date();
-    const issueDate = "2026-05-19";
+    const issueDate = now.toISOString().split("T")[0]; // YYYY-MM-DD
     const issueTime = now.toTimeString().split(" ")[0]; // "21:39:52"
 
     // 4. Estructurar la Data para el Generador XML
