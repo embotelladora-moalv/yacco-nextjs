@@ -121,6 +121,24 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 
 ## 6. Estado del proyecto (snapshot)
 
+### Avances recientes
+
+- **Migración app viejo -> nuevo COMPLETA y verificada**: 21.213 docs, 0 huérfanos, tipos OK. Data sucia heredada conocida: 367 clientes con `documentId="123"` (placeholder viejo) pendientes de DNI/RUC real; 2 `debtAmount` negativos ~0 (float, inocuos).
+- **Export Excel de clientes sin DNI**: `scripts/migration/export-missing-dni.ts`.
+- **Patrón de lectura escalable implementado** (cursor + `count()` + `.select()` + Algolia) en clientes, ventas, pedidos, deudas, inventario, despacho. Helper: `services/repositories/_pagination.ts`. Doc: `docs/PATRON-LECTURA.md`.
+- **kardex_logs**: saldo materializado en `products` + log con `resultingBalance`, escritura log+saldo en misma transacción. NUNCA sumar historial pa stock.
+- **Geolocalización de clientes**: Extracción de lat/lng de enlaces de Google Maps (resolución de enlaces acortados `maps.app.goo.gl` con rate-limit y caché local, parser con prioridad pin > cámara > query). Actualizados 476 clientes con coordenadas y metadatos (`geoSource`, `geoStatus`) en Firestore.
+- **Convención reforzada**: código en inglés, UI en español.
+- **Doc académica I-VIII generada** en `docs/proyecto/` (con placeholders).
+
+### Pendientes siguientes
+
+- Reimport de DNIs (Prompt D) cuando el Excel esté lleno.
+- Backfill kardex si el saldo materializado no existía (dry-run primero).
+- Deploy índices: `firebase deploy --only firestore:indexes`.
+- Rellenar placeholders doc académica (`docs/proyecto/PENDIENTES.md`).
+- Bugs críticos vigentes: BUG-02 (fecha GRE), BUG-03 (worker real), BUG-04 (seed).
+
 ### Críticos pendientes (Sprint 1)
 
 | Bug | Archivo | Qué hay que hacer |

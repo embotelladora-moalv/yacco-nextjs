@@ -48,10 +48,27 @@ export async function saveCustomerAction(
           finalImageUrl = fileName;
         }
 
+        const lat = loc.coordinates?.lat ?? loc.latitude;
+        const lng = loc.coordinates?.lng ?? loc.longitude;
+
+        let geoSource = loc.geoSource;
+        let geoStatus = loc.geoStatus;
+
+        if (loc.coordinates) {
+          if (loc.latitude !== loc.coordinates.lat || loc.longitude !== loc.coordinates.lng) {
+            geoSource = "manual";
+            geoStatus = "OK";
+          }
+        }
+
         return {
           ...loc,
           imageUrl: finalImageUrl,
           id: loc.id || randomUUID(), // Genera un ID si viene undefined del formulario
+          latitude: lat,
+          longitude: lng,
+          geoSource,
+          geoStatus,
         };
       }),
     );

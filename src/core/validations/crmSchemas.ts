@@ -11,6 +11,11 @@ export const customerLocationSchema = z.object({
   isMain: z.boolean().default(false),
   ubigeo: z.string().max(6).optional().or(z.literal("")),
   imageUrl: z.string().optional(),
+  locationUrl: z.string().optional(),
+  latitude: z.coerce.number().optional(),
+  longitude: z.coerce.number().optional(),
+  geoSource: z.enum(["inline", "redirect", "manual"]).optional(),
+  geoStatus: z.enum(["OK", "UNPARSEABLE", "OUT_OF_RANGE"]).optional(),
 
   coordinates: z
     .object({

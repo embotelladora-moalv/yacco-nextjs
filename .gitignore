@@ -44,10 +44,11 @@ serviceAccount.json
 
 /certificates
 
-# Migration scripts — outputs y service accounts locales nunca al repo
+# Migration/Geo scripts — outputs y service accounts locales nunca al repo
 /scripts/migration/*.json
 !/scripts/migration/tsconfig.scripts.json
 /scripts/migration/keys/
 *service-account*.json
 keys/
 *.xlsx
+/scripts/geo/*.json
