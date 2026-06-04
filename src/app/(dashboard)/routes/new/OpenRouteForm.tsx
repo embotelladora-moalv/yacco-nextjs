@@ -121,7 +121,7 @@ export function OpenRouteForm({
               <option value="">Seleccione al conductor...</option>
               {drivers.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.name} {d.lastName}
+                  {d.name}
                 </option>
               ))}
             </select>
@@ -148,7 +148,7 @@ export function OpenRouteForm({
                   disabled={a.id === selectedDriverId} // Evita asignar al mismo chofer como su propio auxiliar
                   className={a.id === selectedDriverId ? "text-slate-300" : ""}
                 >
-                  {a.name} {a.lastName} {a.role === "DRIVER" ? "(Chofer)" : ""}
+                  {a.name} {a.roles?.includes("DRIVER") ? "(Chofer)" : ""}
                 </option>
               ))}
             </select>

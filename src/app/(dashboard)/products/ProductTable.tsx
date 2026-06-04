@@ -228,7 +228,7 @@ export function ProductTable({ initialData }: { initialData: Product[] }) {
                             : "bg-slate-100 text-slate-700"
                       }`}
                     >
-                      {getCategoryLabel(product.category)}
+                      {getCategoryLabel(product.category as ProductCategory)}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-center">
@@ -242,7 +242,7 @@ export function ProductTable({ initialData }: { initialData: Product[] }) {
                     </span>
                   </TableCell>
                   <TableCell className="text-right font-bold tracking-tight text-slate-900">
-                    S/ {(product.basePrice || 0).toFixed(2)}
+                    S/ {(product.priceFull || 0).toFixed(2)}
                   </TableCell>
                   <TableCell className="text-center">
                     <div className="flex items-center justify-center gap-1">

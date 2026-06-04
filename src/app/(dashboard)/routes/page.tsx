@@ -24,10 +24,8 @@ export default async function RoutesPage() {
       ...route,
       truckAlias: truck?.alias || "Camión Desconocido",
       truckPlate: truck?.plateNumber || "N/A",
-      driverName: driver ? `${driver.name} ${driver.lastName}` : "Sin asignar",
-      assistantName: assistant
-        ? `${assistant.name} ${assistant.lastName}`
-        : null,
+      driverName: driver ? driver.name : "Sin asignar",
+      assistantName: assistant ? assistant.name : null,
     };
   });
 

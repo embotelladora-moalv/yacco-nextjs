@@ -1,3 +1,6 @@
+export type OrderStatus = "PENDING" | "ASSIGNED" | "DELIVERED" | "CANCELLED";
+export type PaymentStatus = "PAID" | "PENDING" | "PARTIAL";
+
 export interface OrderItem {
   productId: string;
   quantity: number;
@@ -13,7 +16,7 @@ export interface Order {
 
   // Tiempos y Estado
   expectedDeliveryDate: Date; // Para cuándo lo quiere el cliente
-  status: "PENDING" | "ASSIGNED" | "DELIVERED" | "CANCELLED";
+  status: OrderStatus;
 
   // Vínculo Logístico (Se llena cuando el administrador arma la ruta)
   manifestId?: string; // A qué camión se le asignó esta entrega

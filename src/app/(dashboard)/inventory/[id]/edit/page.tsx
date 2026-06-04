@@ -38,6 +38,7 @@ export default async function EditProductPage({
       </div>
       <ProductForm
         packagingTypes={settings.packagingTypes || []}
+        maquilaBrands={settings.maquilaBrands || []}
         initialData={initialData}
       />
     </div>

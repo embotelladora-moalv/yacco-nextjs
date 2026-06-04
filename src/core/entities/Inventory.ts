@@ -7,6 +7,7 @@ export interface Product {
   name: string;
   sku: string;
   operationalCategory: "FULL_PRODUCT" | "EMPTY_CONTAINER" | "ACCESSORY";
+  category?: string; // campo legacy del schema anterior
   packagingType: string;
 
   // NUEVOS CAMPOS DE MAQUILA

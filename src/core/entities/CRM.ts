@@ -9,10 +9,12 @@ export interface CustomerContainerBalance {
 export interface CustomerLocation {
   id: string;
   name: string;
-  address: string;
+  address?: string | null;
   reference?: string;
   contactName?: string;
   contactPhone?: string;
+  ubigeo?: string;
+  imageUrl?: string;
   coordinates?: { lat: number; lng: number };
   isMain: boolean;
 }

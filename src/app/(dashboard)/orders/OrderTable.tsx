@@ -67,7 +67,7 @@ export function OrderTable({ initialData }: { initialData: any[] }) {
   // Funciones de ayuda para estilos visuales
   const getStatusBadge = (status: OrderStatus) => {
     const config = {
-      RESERVED: {
+      PENDING: {
         color: "bg-amber-100 text-amber-700",
         label: "RESERVA",
         icon: <Clock className="h-3 w-3 mr-1" />,
@@ -156,7 +156,7 @@ export function OrderTable({ initialData }: { initialData: any[] }) {
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => {
-                    setStatusFilter("RESERVED");
+                    setStatusFilter("PENDING");
                     setPage(0);
                   }}
                 >

@@ -28,7 +28,8 @@ export function CollectionForm({
     defaultValues: {
       customerId: "",
       amount: 0,
-      method: "TRANSFER",
+      date: new Date().toISOString().split("T")[0],
+      paymentMethod: "TRANSFER",
       reference: "",
       notes: "",
     },
@@ -133,12 +134,13 @@ export function CollectionForm({
               Método de Ingreso
             </Label>
             <select
-              {...form.register("method")}
+              {...form.register("paymentMethod")}
               className="w-full h-12 px-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-600 outline-none font-medium"
             >
-              <option value="TRANSFER">Transferencia Bancaria</option>
-              <option value="YAPE">Yape / Plin</option>
+              <option value="TRANSFER">Transferencia / Yape / Plin</option>
               <option value="CASH">Efectivo (Caja Física)</option>
+              <option value="CHECK">Cheque</option>
+              <option value="OTHER">Otro</option>
             </select>
           </div>
 
