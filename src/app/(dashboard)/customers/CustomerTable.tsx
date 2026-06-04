@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { Customer } from "@/core/entities/CRM";
 import { Product } from "@/core/entities/Inventory"; //
+import { useRouter, usePathname } from "next/navigation";
 import {
   Search,
   Filter,
@@ -43,17 +44,47 @@ import { toast } from "sonner";
 
 interface CustomerTableProps {
   initialCustomers: Customer[];
-  products: Product[]; // 🔥 Conectamos el catálogo para saber los nombres de los bidones
+  products: Product[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  totalCount: number;
+  currentSearch: string;
+  currentCursors: string;
+  currentLimit: number;
 }
 
 export function CustomerTable({
   initialCustomers,
   products,
+  nextCursor,
+  hasMore,
+  totalCount,
+  currentSearch,
+  currentCursors,
+  currentLimit,
 }: CustomerTableProps) {
+  // --- NAVEGACIÓN Y SEARCH ROUTER ---
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const navigate = (params: { q?: string; cursors?: string; limit?: number }) => {
+    const query = new URLSearchParams();
+    const newSearch = params.q !== undefined ? params.q : currentSearch;
+    if (newSearch) {
+      query.set("q", newSearch);
+    }
+    const newCursors = params.cursors !== undefined ? params.cursors : currentCursors;
+    if (newCursors) {
+      query.set("cursors", newCursors);
+    }
+    const newLimit = params.limit !== undefined ? params.limit : currentLimit;
+    query.set("limit", String(newLimit));
+    
+    router.push(`${pathname}?${query.toString()}`);
+  };
+
   // --- ESTADOS DE TABLA ---
-  const [searchQuery, setSearchQuery] = useState("");
-  const [filteredCustomersList, setFilteredCustomersList] =
-    useState<Customer[]>(initialCustomers);
+  const [searchQuery, setSearchQuery] = useState(currentSearch);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "ACTIVE" | "INACTIVE"
@@ -64,9 +95,10 @@ export function CustomerTable({
   const [showFilters, setShowFilters] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
-  // Paginación
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  // Derivado de cursorsParam en la URL
+  const cursorArray = currentCursors ? currentCursors.split(",") : [];
+  const currentPage = cursorArray.length + 1;
+  const itemsPerPage = currentLimit;
 
   // --- ESTADOS PARA MODALS INTERNOS DE CONFIGURACIÓN ---
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
@@ -97,14 +129,33 @@ export function CustomerTable({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Debounce para la búsqueda en servidor
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchQuery !== currentSearch) {
+        navigate({ q: searchQuery, cursors: "" }); // Reset de cursors al buscar
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  // Handlers para paginación por pila de cursores
+  const handleNextPage = () => {
+    if (!hasMore || !nextCursor) return;
+    const nextCursors = currentCursors ? `${currentCursors},${nextCursor}` : nextCursor;
+    navigate({ cursors: nextCursors });
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage === 1) return;
+    const prevCursors = cursorArray.slice(0, -1).join(",");
+    navigate({ cursors: prevCursors });
+  };
+
   // --- LÓGICA DE FILTRADO Y MIGRACIÓN SEGURA ---
   const filteredCustomers = useMemo(() => {
     return initialCustomers.filter((c) => {
-      const matchesSearch =
-        c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.documentNumber.includes(searchQuery) ||
-        c.alias?.toLowerCase().includes(searchQuery.toLowerCase());
-
+      // Nota: Búsqueda ya está filtrada en el servidor
       const matchesTags =
         selectedTags.length === 0 ||
         selectedTags.some((tag) => c.tags?.includes(tag));
@@ -124,15 +175,12 @@ export function CustomerTable({
         (debtFilter === "WITH_DEBT" && hasAnyDebt) ||
         (debtFilter === "NO_DEBT" && !hasAnyDebt);
 
-      return matchesSearch && matchesTags && matchesStatus && matchesDebt;
+      return matchesTags && matchesStatus && matchesDebt;
     });
-  }, [initialCustomers, searchQuery, selectedTags, statusFilter, debtFilter]);
+  }, [initialCustomers, selectedTags, statusFilter, debtFilter]);
 
-  const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
-  const paginatedData = filteredCustomers.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage,
-  );
+  const totalPages = Math.ceil(totalCount / itemsPerPage);
+  const paginatedData = filteredCustomers; // Ya segmentado en el servidor!
   const allTags = Array.from(
     new Set(initialCustomers.flatMap((c) => c.tags || [])),
   );
@@ -237,7 +285,6 @@ export function CustomerTable({
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
-              setCurrentPage(1);
             }}
             className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
           />
@@ -592,8 +639,7 @@ export function CustomerTable({
           <select
             value={itemsPerPage}
             onChange={(e) => {
-              setItemsPerPage(Number(e.target.value));
-              setCurrentPage(1);
+              navigate({ limit: Number(e.target.value), cursors: "" });
             }}
             className="border border-slate-200 bg-white rounded-md px-2 py-1 font-bold text-slate-700 focus:outline-none shadow-sm"
           >
@@ -608,7 +654,7 @@ export function CustomerTable({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setCurrentPage((prev) => prev - 1)}
+            onClick={handlePrevPage}
             disabled={currentPage === 1}
             className="h-8 w-8 p-0 bg-white shadow-sm"
           >
@@ -620,8 +666,8 @@ export function CustomerTable({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setCurrentPage((prev) => prev + 1)}
-            disabled={currentPage === totalPages || totalPages === 0}
+            onClick={handleNextPage}
+            disabled={!hasMore || !nextCursor}
             className="h-8 w-8 p-0 bg-white shadow-sm"
           >
             <ChevronRight className="h-4 w-4" />

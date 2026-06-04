@@ -7,9 +7,35 @@ import { inventoryRepository } from "@/services/repositories/inventoryRepository
 
 export const dynamic = "force-dynamic";
 
-export default async function CustomersPage() {
-  const initialCustomers = await customerRepository.getInitialCustomers(100);
-  const products = await inventoryRepository.getAllProducts();
+interface PageProps {
+  searchParams: Promise<{
+    cursor?: string;
+    q?: string;
+    cursors?: string;
+    limit?: string;
+  }>;
+}
+
+export default async function CustomersPage({ searchParams }: PageProps) {
+  const resolvedSearchParams = await searchParams;
+  const q = resolvedSearchParams.q || "";
+  const cursorsParam = resolvedSearchParams.cursors || "";
+  const limit = resolvedSearchParams.limit ? parseInt(resolvedSearchParams.limit, 10) : 10;
+
+  // Descomponemos la pila de cursores de la URL. El cursor activo para Firestore es el último
+  const cursorArray = cursorsParam ? cursorsParam.split(",") : [];
+  const currentCursor = cursorArray[cursorArray.length - 1];
+
+  const [paginatedData, products] = await Promise.all([
+    customerRepository.listPaginated({
+      pageSize: limit,
+      cursor: currentCursor,
+      search: q,
+    }),
+    inventoryRepository.getAllProducts(),
+  ]);
+
+  const { items: customers, nextCursor, hasMore, totalCount } = paginatedData;
 
   return (
     <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4 sm:px-6 space-y-8">
@@ -36,7 +62,16 @@ export default async function CustomersPage() {
       </div>
 
       {/* COMPONENTE DE TABLA CON FILTROS */}
-      <CustomerTable initialCustomers={initialCustomers} products={products} />
+      <CustomerTable
+        initialCustomers={customers}
+        products={products}
+        nextCursor={nextCursor}
+        hasMore={hasMore}
+        totalCount={totalCount}
+        currentSearch={q}
+        currentCursors={cursorsParam}
+        currentLimit={limit}
+      />
     </div>
   );
 }
