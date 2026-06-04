@@ -2,8 +2,18 @@ import { NextResponse } from "next/server";
 import { adminDb } from "@/services/firebase/admin";
 import admin from "firebase-admin";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    // 0. Protecciones de seguridad
+    if (process.env.NODE_ENV === "production") {
+      return NextResponse.json({ error: "Not Found" }, { status: 404 });
+    }
+
+    const token = request.headers.get("x-seed-token");
+    if (!token || token !== process.env.SEED_TOKEN) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const timestamp = admin.firestore.FieldValue.serverTimestamp();
 
     // 1. CREAR PRODUCTOS
