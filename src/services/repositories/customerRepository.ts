@@ -1,6 +1,9 @@
 import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { Customer } from "@/core/entities/CRM";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
+import { customerSearchService } from "../search/customerSearchService";
+import { paginate } from "./_pagination";
 
 const CUSTOMERS_COLLECTION = "customers";
 
@@ -57,6 +60,80 @@ export const customerRepository = {
   },
 
   /**
+   * Obtiene el conteo total de clientes utilizando getCountFromServer para optimización de costos.
+   */
+  async getCustomerCount(): Promise<number> {
+    const countSnapshot = await adminDb.collection(CUSTOMERS_COLLECTION).count().get();
+    return countSnapshot.data().count;
+  },
+
+  /**
+   * Obtiene una lista paginada y filtrada de clientes con campos seleccionados.
+   */
+  async listPaginated(options: {
+    pageSize: number;
+    cursor?: string;
+    search?: string;
+  }): Promise<{ items: Customer[]; nextCursor: string | null; hasMore: boolean; totalCount: number }> {
+    if (options.search) {
+      const page = options.cursor ? parseInt(options.cursor, 10) : 0;
+      const searchResult = await customerSearchService.searchCustomers({
+        query: options.search,
+        page,
+        hitsPerPage: options.pageSize,
+      });
+
+      return {
+        items: searchResult.data.map((hit: any) => serializeFirestoreData(hit)),
+        nextCursor: page + 1 < searchResult.totalPages ? String(page + 1) : null,
+        hasMore: page + 1 < searchResult.totalPages,
+        totalCount: searchResult.totalHits,
+      };
+    }
+
+    const query = adminDb
+      .collection(CUSTOMERS_COLLECTION)
+      .select(
+        "name",
+        "isActive",
+        "documentType",
+        "documentNumber",
+        "alias",
+        "locations",
+        "debtAmount",
+        "containerBalances",
+        "lastSaleDate",
+        "tags",
+        "createdAt"
+      )
+      .orderBy("name", "asc")
+      .orderBy("__name__", "asc");
+
+    const [paginatedResult, totalCount] = await Promise.all([
+      paginate<Customer>(
+        query,
+        options,
+        ["name", "id"],
+        (doc) => {
+          const data = doc.data();
+          return serializeFirestoreData({
+            id: doc.id,
+            ...data,
+            containerBalances: data.containerBalances || [],
+            locations: data.locations || [],
+          });
+        }
+      ),
+      this.getCustomerCount()
+    ]);
+
+    return {
+      ...paginatedResult,
+      totalCount,
+    };
+  },
+
+  /**
    * Obtiene la lista completa de clientes con fechas serializadas y validación de nulidad
    */
   async getAllCustomers(): Promise<Customer[]> {
@@ -67,23 +144,17 @@ export const customerRepository = {
 
     return snapshot.docs
       .map((doc) => {
-        const data = doc.data(); // Aquí data podría ser undefined según TS
-
-        // Verificamos que 'data' exista para poder mapear
+        const data = doc.data();
         if (!data) return null;
 
-        return {
+        return serializeFirestoreData({
           id: doc.id,
           ...data,
           containerBalances: data.containerBalances || [],
           locations: data.locations || [],
-          // Usamos el operador '?.' para proteger la ejecución si el campo no existe
-          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-          lastSaleDate: data.lastSaleDate?.toDate?.()?.toISOString() || null,
-        };
+        });
       })
-      .filter((c): c is any => c !== null); // Filtramos nulos para limpiar el array
+      .filter((c): c is any => c !== null);
   },
 
   /**
@@ -92,27 +163,22 @@ export const customerRepository = {
   async getCustomerById(id: string): Promise<Customer | null> {
     const doc = await adminDb.collection(CUSTOMERS_COLLECTION).doc(id).get();
 
-    // Validamos primero si el documento existe
     if (!doc.exists) return null;
 
     const data = doc.data();
     if (!data) return null;
 
-    return {
+    return serializeFirestoreData({
       id: doc.id,
       ...data,
       containerBalances: data.containerBalances || [],
       locations: data.locations || [],
-      createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-      updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-      lastSaleDate: data.lastSaleDate?.toDate?.()?.toISOString() || null,
-    } as any;
+    });
   },
 
   async getCustomersByIds(customerIds: string[]) {
     const customersData: Record<string, any> = {};
 
-    // Dividimos en lotes de 10 (Límite de Firebase para la cláusula 'in')
     const chunks = [];
     for (let i = 0; i < customerIds.length; i += 10) {
       chunks.push(customerIds.slice(i, i + 10));
@@ -126,15 +192,10 @@ export const customerRepository = {
 
       snapshot.forEach((doc) => {
         const data = doc.data();
-
-        customersData[doc.id] = {
+        customersData[doc.id] = serializeFirestoreData({
           id: doc.id,
           ...data,
-          // SERIALIZACIÓN OBLIGATORIA PARA NEXT.JS: Convertimos los Timestamps a strings ISO
-          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-          lastSaleDate: data.lastSaleDate?.toDate?.()?.toISOString() || null,
-        };
+        });
       });
     }
 
@@ -143,7 +204,6 @@ export const customerRepository = {
 
   /**
    * Obtiene la carga inicial de clientes (Paginada desde el servidor)
-   * Ideal para no colapsar la memoria del Frontend al cargar la tabla principal.
    * @param limitSize Cantidad máxima de registros a traer (Por defecto 100)
    */
   async getInitialCustomers(limitSize: number = 100): Promise<Customer[]> {
@@ -156,21 +216,15 @@ export const customerRepository = {
     return snapshot.docs
       .map((doc) => {
         const data = doc.data();
-
-        // Verificamos que la data exista
         if (!data) return null;
 
-        return {
+        return serializeFirestoreData({
           id: doc.id,
           ...data,
           containerBalances: data.containerBalances || [],
           locations: data.locations || [],
-          // SERIALIZACIÓN OBLIGATORIA PARA NEXT.JS SERVER COMPONENTS
-          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-          lastSaleDate: data.lastSaleDate?.toDate?.()?.toISOString() || null,
-        };
+        });
       })
-      .filter((c): c is any => c !== null); // Filtramos nulos por seguridad
+      .filter((c): c is any => c !== null);
   },
 };
