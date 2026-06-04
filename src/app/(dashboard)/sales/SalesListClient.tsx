@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo, useTransition } from "react";
 import { Sale, Customer } from "@/core/entities/CRM";
 import { Product } from "@/core/entities/Inventory";
-import { fetchPaginatedSalesAction } from "./actions";
+import { useRouter, usePathname } from "next/navigation";
 import {
   ShoppingCart,
   Calendar,
@@ -32,40 +32,45 @@ interface SalesListProps {
   sales: Sale[];
   customers: Customer[];
   products: Product[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  currentCursors: string;
+  currentLimit: number;
+  currentFilter: string;
 }
 
 export function SalesListClient({
-  sales: initialSales,
+  sales,
   customers,
   products,
+  nextCursor,
+  hasMore,
+  currentCursors,
+  currentLimit,
+  currentFilter,
 }: SalesListProps) {
-  // --- ESTADOS DE DATOS ---
-  const [salesList, setSalesList] = useState<Sale[]>(initialSales);
-  const [isLoading, setIsLoading] = useState(false);
-  const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
 
-  // Mapa local para acumular los clientes cargados y evitar N+1
-  const [customerMap, setCustomerMap] = useState<Record<string, Customer>>(() => {
+  const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+
+  // Mapa local para evitar N+1
+  const customerMap = useMemo(() => {
     const map: Record<string, Customer> = {};
     customers.forEach((c) => {
       map[c.id] = c;
     });
     return map;
-  });
+  }, [customers]);
 
-  // --- PAGINACIÓN ESCALABLE (CURSORES) ---
-  const [pageSize, setPageSize] = useState(10);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [hasMore, setHasMore] = useState(initialSales.length === 10);
-  const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([
-    undefined,
-  ]);
-
-  // --- FILTROS Y BÚSQUEDA ---
-  const [searchTerm, setSearchTerm] = useState("");
-  const [paymentFilter, setPaymentFilter] = useState("ALL");
-  const [showFilters, setShowFilters] = useState(false);
-  const filterRef = useRef<HTMLDivElement>(null);
+  const cursorArray = currentCursors ? currentCursors.split(",") : [];
+  const currentPage = cursorArray.length + 1;
+  const pageSize = currentLimit;
+  const paymentFilter = currentFilter;
 
   // Cierra el popup de filtros si se hace clic afuera
   useEffect(() => {
@@ -135,57 +140,44 @@ export function SalesListClient({
     );
   };
 
-  // --- LÓGICA DEL SERVIDOR ---
-  const loadPage = async (
-    pageIndex: number,
-    cursor?: string,
-    filter = paymentFilter,
-    size = pageSize,
-  ) => {
-    setIsLoading(true);
-    const result = await fetchPaginatedSalesAction(size, cursor, filter);
-    if (result.success && result.sales) {
-      setSalesList(result.sales);
-      setCurrentPage(pageIndex);
-      setHasMore(result.sales.length === size);
-
-      if ((result as any).customersData) {
-        setCustomerMap((prev) => ({
-          ...prev,
-          ...(result as any).customersData,
-        }));
-      }
+  // --- LÓGICA DE NAVEGACIÓN ---
+  const navigate = (params: { filter?: string; cursors?: string; limit?: number }) => {
+    const query = new URLSearchParams();
+    const newFilter = params.filter !== undefined ? params.filter : currentFilter;
+    if (newFilter && newFilter !== "ALL") {
+      query.set("filter", newFilter);
     }
-    setIsLoading(false);
+    const newCursors = params.cursors !== undefined ? params.cursors : currentCursors;
+    if (newCursors) {
+      query.set("cursors", newCursors);
+    }
+    const newLimit = params.limit !== undefined ? params.limit : currentLimit;
+    query.set("limit", String(newLimit));
+
+    startTransition(() => {
+      router.push(`${pathname}?${query.toString()}`);
+    });
   };
 
   const handleNextPage = () => {
-    const lastSale = salesList[salesList.length - 1];
-    if (!lastSale) return;
-    const nextCursor = lastSale.createdAt as unknown as string;
-    setCursorStack((prev) => {
-      const newStack = [...prev];
-      newStack[currentPage] = nextCursor;
-      return newStack;
-    });
-    loadPage(currentPage + 1, nextCursor);
+    if (!hasMore || !nextCursor) return;
+    const nextCursors = currentCursors ? `${currentCursors},${nextCursor}` : nextCursor;
+    navigate({ cursors: nextCursors });
   };
 
   const handlePrevPage = () => {
     if (currentPage === 1) return;
-    const prevCursor = cursorStack[currentPage - 2];
-    loadPage(currentPage - 1, prevCursor);
+    const prevCursors = cursorArray.slice(0, -1).join(",");
+    navigate({ cursors: prevCursors });
   };
 
   const applyFilters = (newFilter: string) => {
-    setPaymentFilter(newFilter);
-    setCursorStack([undefined]);
     setShowFilters(false);
-    loadPage(1, undefined, newFilter);
+    navigate({ filter: newFilter, cursors: "" }); // Reset de cursores al filtrar
   };
 
-  const displaySales = salesList.filter((sale) => {
-    const cName = (getCustomer(sale.customerId)?.name || "").toLowerCase();
+  const displaySales = sales.filter((sale) => {
+    const cName = (getCustomer(sale.customerId)?.name || sale.customerName || "").toLowerCase();
     const sId = sale.id.toLowerCase();
     return (
       cName.includes(searchTerm.toLowerCase()) ||
@@ -195,7 +187,7 @@ export function SalesListClient({
 
   return (
     <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm flex flex-col relative min-h-[500px]">
-      {isLoading && (
+      {isPending && (
         <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-10 flex items-center justify-center rounded-[2rem]">
           <Loader2 className="h-8 w-8 text-emerald-500 animate-spin" />
         </div>
@@ -509,9 +501,7 @@ export function SalesListClient({
           <select
             value={pageSize}
             onChange={(e) => {
-              setPageSize(Number(e.target.value));
-              setCursorStack([undefined]);
-              loadPage(1, undefined, paymentFilter, Number(e.target.value));
+              navigate({ limit: Number(e.target.value), cursors: "" });
             }}
             className="border border-slate-200 bg-white rounded-md px-2 py-1 font-bold text-slate-700 focus:outline-none"
           >
@@ -527,7 +517,7 @@ export function SalesListClient({
             variant="outline"
             size="sm"
             onClick={handlePrevPage}
-            disabled={currentPage === 1 || isLoading}
+            disabled={currentPage === 1}
             className="h-8 w-8 p-0"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -539,7 +529,7 @@ export function SalesListClient({
             variant="outline"
             size="sm"
             onClick={handleNextPage}
-            disabled={!hasMore || isLoading}
+            disabled={!hasMore || !nextCursor}
             className="h-8 w-8 p-0"
           >
             <ChevronRight className="h-4 w-4" />

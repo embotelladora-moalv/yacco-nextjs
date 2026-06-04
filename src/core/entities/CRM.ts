@@ -67,6 +67,8 @@ export interface Sale {
   driverId: string;
   registeredBy?: string;
   customerId: string;
+  customerName?: string;
+  customerAlias?: string;
   items: SaleItem[];
   returnedEmpties: SaleEmptyReturn[];
   totalAmount: number;

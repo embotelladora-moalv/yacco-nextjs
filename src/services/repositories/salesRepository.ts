@@ -5,6 +5,7 @@ import { SaleFormValues } from "@/core/validations/crmSchemas";
 import { adminDb } from "@/services/firebase/admin";
 import { PaymentFormValues } from "@/core/validations/paymentSchema";
 import { serializeFirestoreData } from "@/services/firebase/serialization";
+import { paginate } from "./_pagination";
 
 const SALES_COLLECTION = "sales";
 const CUSTOMERS_COLLECTION = "customers";
@@ -487,5 +488,134 @@ export const salesRepository = {
       trucks,
       drivers,
     });
+  },
+
+  async listPaginated(options: {
+    pageSize: number;
+    cursor?: string;
+    paymentFilter?: string;
+    customerId?: string;
+    isBilled?: boolean;
+    startDate?: string;
+    endDate?: string;
+  }) {
+    let query: admin.firestore.Query = adminDb.collection(SALES_COLLECTION);
+
+    if (options.paymentFilter && options.paymentFilter !== "ALL") {
+      query = query.where("paymentMethod", "==", options.paymentFilter);
+    }
+    if (options.customerId) {
+      query = query.where("customerId", "==", options.customerId);
+    }
+    if (options.isBilled !== undefined) {
+      query = query.where("isBilled", "==", options.isBilled);
+    }
+    if (options.startDate) {
+      const startTimestamp = admin.firestore.Timestamp.fromDate(new Date(options.startDate));
+      query = query.where("createdAt", ">=", startTimestamp);
+    }
+    if (options.endDate) {
+      const endTimestamp = admin.firestore.Timestamp.fromDate(new Date(options.endDate));
+      query = query.where("createdAt", "<=", endTimestamp);
+    }
+
+    query = query
+      .select(
+        "id",
+        "createdAt",
+        "customerId",
+        "customerName",
+        "customerAlias",
+        "paymentMethod",
+        "totalAmount",
+        "cashReceived",
+        "digitalReceived",
+        "remainingBalance",
+        "isBilled",
+        "sunatDocumentId",
+        "items",
+        "billingSkipped"
+      )
+      .orderBy("createdAt", "desc")
+      .orderBy("__name__", "desc");
+
+    return await paginate<Sale>(
+      query,
+      options,
+      ["createdAt", "id"],
+      (doc) => {
+        const data = doc.data();
+        return serializeFirestoreData({
+          id: doc.id,
+          ...data,
+          items: data.items || [],
+        }) as Sale;
+      }
+    );
+  },
+
+  async getSalesMetrics(options: {
+    paymentFilter?: string;
+    customerId?: string;
+    isBilled?: boolean;
+    startDate?: string;
+    endDate?: string;
+  }) {
+    let query: admin.firestore.Query = adminDb.collection(SALES_COLLECTION);
+
+    if (options.paymentFilter && options.paymentFilter !== "ALL") {
+      query = query.where("paymentMethod", "==", options.paymentFilter);
+    }
+    if (options.customerId) {
+      query = query.where("customerId", "==", options.customerId);
+    }
+    if (options.isBilled !== undefined) {
+      query = query.where("isBilled", "==", options.isBilled);
+    }
+    if (options.startDate) {
+      const startTimestamp = admin.firestore.Timestamp.fromDate(new Date(options.startDate));
+      query = query.where("createdAt", ">=", startTimestamp);
+    }
+    if (options.endDate) {
+      const endTimestamp = admin.firestore.Timestamp.fromDate(new Date(options.endDate));
+      query = query.where("createdAt", "<=", endTimestamp);
+    }
+
+    let totalRevenue = 0;
+    let totalCash = 0;
+    let totalDigital = 0;
+
+    try {
+      const aggSnapshot = await query.aggregate({
+        totalRevenue: admin.firestore.AggregateField.sum("totalAmount"),
+        totalCash: admin.firestore.AggregateField.sum("cashReceived"),
+        totalDigital: admin.firestore.AggregateField.sum("digitalReceived"),
+      }).get();
+
+      const aggData = aggSnapshot.data();
+      totalRevenue = aggData.totalRevenue || 0;
+      totalCash = aggData.totalCash || 0;
+      totalDigital = aggData.totalDigital || 0;
+    } catch (err) {
+      console.error("Error in getSalesMetrics aggregate sum, fallback to 0:", err);
+    }
+
+    return {
+      totalRevenue,
+      totalCash,
+      totalDigital,
+    };
+  },
+
+  async getSalesCountThisMonth(): Promise<number> {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startTimestamp = admin.firestore.Timestamp.fromDate(startOfMonth);
+    const countSnapshot = await adminDb
+      .collection(SALES_COLLECTION)
+      .where("createdAt", ">=", startTimestamp)
+      .count()
+      .get();
+    return countSnapshot.data().count;
   },
 };
