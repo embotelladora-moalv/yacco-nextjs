@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Customer } from "@/core/entities/CRM";
+import { useRouter, usePathname } from "next/navigation";
 import {
   HandCoins,
   Search,
@@ -10,6 +11,8 @@ import {
   ArrowRight,
   ShieldAlert,
   BadgeDollarSign,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,22 +20,74 @@ import Link from "next/link";
 
 interface CollectionsClientProps {
   debtors: Customer[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  currentCursors: string;
+  currentLimit: number;
+  currentSearch: string;
+  totalCount: number;
+  totalDebtAmount: number;
 }
 
-export function CollectionsClient({ debtors }: CollectionsClientProps) {
-  const [searchTerm, setSearchTerm] = useState("");
+export function CollectionsClient({
+  debtors,
+  nextCursor,
+  hasMore,
+  currentCursors,
+  currentLimit,
+  currentSearch,
+  totalCount,
+  totalDebtAmount,
+}: CollectionsClientProps) {
+  const router = useRouter();
+  const pathname = usePathname();
 
-  const filteredDebtors = debtors.filter(
-    (customer) =>
-      customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.alias?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.documentNumber.includes(searchTerm),
-  );
+  const [searchQuery, setSearchQuery] = useState(currentSearch);
 
-  const totalDebt = debtors.reduce(
-    (acc, curr) => acc + (curr.debtAmount || 0),
-    0,
-  );
+  const cursorArray = currentCursors ? currentCursors.split(",") : [];
+  const currentPage = cursorArray.length + 1;
+  const pageSize = currentLimit;
+
+  const navigate = (params: { q?: string; cursors?: string; limit?: number }) => {
+    const query = new URLSearchParams();
+    const newSearch = params.q !== undefined ? params.q : currentSearch;
+    if (newSearch) {
+      query.set("q", newSearch);
+    }
+    const newCursors = params.cursors !== undefined ? params.cursors : currentCursors;
+    if (newCursors) {
+      query.set("cursors", newCursors);
+    }
+    const newLimit = params.limit !== undefined ? params.limit : currentLimit;
+    query.set("limit", String(newLimit));
+
+    router.push(`${pathname}?${query.toString()}`);
+  };
+
+  // Debounce for search
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchQuery !== currentSearch) {
+        navigate({ q: searchQuery, cursors: "" }); // Reset cursors when searching
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  const handleNextPage = () => {
+    if (!hasMore || !nextCursor) return;
+    const nextCursors = currentCursors ? `${currentCursors},${nextCursor}` : nextCursor;
+    navigate({ cursors: nextCursors });
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage === 1) return;
+    const prevCursors = cursorArray.slice(0, -1).join(",");
+    navigate({ cursors: prevCursors });
+  };
+
+  const filteredDebtors = debtors;
+  const totalDebt = totalDebtAmount;
 
   return (
     <div className="space-y-6">
@@ -69,8 +124,8 @@ export function CollectionsClient({ debtors }: CollectionsClientProps) {
             <Input
               type="text"
               placeholder="Buscar por nombre, alias o RUC/DNI..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10 h-12 bg-white border-slate-200 font-medium rounded-xl"
             />
           </div>
@@ -94,7 +149,7 @@ export function CollectionsClient({ debtors }: CollectionsClientProps) {
                     className="px-6 py-16 text-center text-slate-400 font-medium"
                   >
                     <HandCoins className="h-10 w-10 mx-auto mb-3 opacity-20" />
-                    {searchTerm
+                    {searchQuery
                       ? "No se encontraron clientes morosos con esa búsqueda."
                       : "¡Excelente! No hay clientes con deudas activas."}
                   </td>
@@ -164,6 +219,49 @@ export function CollectionsClient({ debtors }: CollectionsClientProps) {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* FOOTER: PAGINACIÓN ESCALABLE */}
+        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex flex-col md:flex-row items-center justify-between gap-4 mt-auto rounded-b-[2rem]">
+          <div className="flex items-center gap-2 text-sm text-slate-500 font-medium">
+            <span>Mostrar</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                navigate({ limit: Number(e.target.value), cursors: "" });
+              }}
+              className="border border-slate-200 bg-white rounded-md px-2 py-1 font-bold text-slate-700 focus:outline-none shadow-sm"
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+            <span>registros</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePrevPage}
+              disabled={currentPage === 1}
+              className="h-8 w-8 p-0 bg-white shadow-sm"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="flex items-center px-4 h-8 text-sm font-bold text-slate-700 bg-white border border-slate-200 rounded-md shadow-sm">
+              Página {currentPage}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleNextPage}
+              disabled={!hasMore || !nextCursor}
+              className="h-8 w-8 p-0 bg-white shadow-sm"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

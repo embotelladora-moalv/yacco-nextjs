@@ -227,4 +227,77 @@ export const customerRepository = {
       })
       .filter((c): c is any => c !== null);
   },
+
+  /**
+   * Obtiene una lista paginada y agregada de deudores (debtAmount > 0)
+   */
+  async listDebtorsPaginated(options: {
+    pageSize: number;
+    cursor?: string;
+    search?: string;
+  }) {
+    if (options.search) {
+      const page = options.cursor ? parseInt(options.cursor, 10) : 0;
+      const searchResult = await customerSearchService.searchCustomers({
+        query: options.search,
+        page,
+        hitsPerPage: options.pageSize * 2,
+      });
+
+      const debtorsHits = searchResult.data
+        .map((hit: any) => serializeFirestoreData(hit))
+        .filter((c: any) => Number(c.debtAmount || 0) > 0);
+
+      return {
+        items: debtorsHits.slice(0, options.pageSize) as Customer[],
+        nextCursor: page + 1 < searchResult.totalPages ? String(page + 1) : null,
+        hasMore: page + 1 < searchResult.totalPages,
+        totalCount: searchResult.totalHits,
+        totalDebtAmount: debtorsHits.reduce((acc, curr: any) => acc + Number(curr.debtAmount || 0), 0),
+      };
+    }
+
+    let query = adminDb
+      .collection(CUSTOMERS_COLLECTION)
+      .select("name", "alias", "documentType", "documentNumber", "contactName", "contactPhone", "debtAmount", "createdAt")
+      .where("debtAmount", ">", 0)
+      .orderBy("debtAmount", "desc")
+      .orderBy("__name__", "desc");
+
+    const [paginatedResult, countSnapshot, sumSnapshot] = await Promise.all([
+      paginate<Customer>(
+        query,
+        options,
+        ["debtAmount", "id"],
+        (doc) => {
+          const data = doc.data();
+          return serializeFirestoreData({
+            id: doc.id,
+            ...data,
+          }) as Customer;
+        }
+      ),
+      adminDb
+        .collection(CUSTOMERS_COLLECTION)
+        .where("debtAmount", ">", 0)
+        .count()
+        .get(),
+      adminDb
+        .collection(CUSTOMERS_COLLECTION)
+        .where("debtAmount", ">", 0)
+        .aggregate({
+          totalDebt: admin.firestore.AggregateField.sum("debtAmount"),
+        })
+        .get(),
+    ]);
+
+    const totalCount = countSnapshot.data().count;
+    const totalDebtAmount = sumSnapshot.data().totalDebt || 0;
+
+    return {
+      ...paginatedResult,
+      totalCount,
+      totalDebtAmount,
+    };
+  },
 };
