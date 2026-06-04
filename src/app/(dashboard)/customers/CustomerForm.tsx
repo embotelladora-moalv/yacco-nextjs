@@ -60,9 +60,22 @@ export function CustomerForm({ initialData, products }: CustomerFormProps) {
     initialData?.tags?.join(", ") || "",
   );
 
+  const formattedInitialData = initialData
+    ? {
+        ...initialData,
+        locations: (initialData.locations || []).map((loc: any) => ({
+          ...loc,
+          coordinates:
+            loc.latitude !== undefined && loc.longitude !== undefined
+              ? { lat: Number(loc.latitude), lng: Number(loc.longitude) }
+              : undefined,
+        })),
+      }
+    : undefined;
+
   const form = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema) as any,
-    defaultValues: initialData || {
+    defaultValues: formattedInitialData || {
       name: "",
       alias: "",
       documentType: "DNI",
