@@ -18,6 +18,8 @@ export interface CustomerLocation {
   isDefault: boolean;
   // ---> CAMBIO: Contacto específico para esta ubicación <---
   contact?: CustomerContact;
+  geoSource?: "inline" | "redirect";
+  geoStatus?: "OK" | "UNPARSEABLE" | "OUT_OF_RANGE";
 }
 
 export interface Customer {
