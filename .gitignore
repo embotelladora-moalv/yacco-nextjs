@@ -52,3 +52,5 @@ serviceAccount.json
 keys/
 *.xlsx
 /scripts/geo/*.json
+/scripts/backfill/*.json
+liquidation-time-report.json
