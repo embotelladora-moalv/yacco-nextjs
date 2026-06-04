@@ -447,12 +447,16 @@ export const salesRepository = {
       .where("isBilled", "==", false)
       .get();
 
-    // 2. Mapeamos TODA la data (incluyendo items) y serializamos fechas
+    // 2. Mapeamos TODA la data (incluyendo items) y serializamos fechas.
+    // Listamos explícitamente los campos críticos antes del spread para que
+    // TypeScript pueda inferir el tipo correcto (el spread de DocumentData lo oculta).
     const pendingSales = snapshot.docs.map((doc) => {
       const data = doc.data();
       return {
-        id: doc.id,
         ...data,
+        id: doc.id,
+        customerId: (data.customerId ?? "") as string,
+        totalAmount: (data.totalAmount ?? 0) as number,
         issueDate: data.createdAt?.toDate
           ? data.createdAt.toDate().toLocaleDateString("es-PE")
           : "Sin fecha",

@@ -55,10 +55,10 @@ export default function CustomerMap({ customers }: { customers: Customer[] }) {
       .filter((c) => {
         if (c.id === activeId) return false;
         const d = getDistanceInKm(
-          active.locations[0].latitude,
-          active.locations[0].longitude,
-          c.locations[0].latitude,
-          c.locations[0].longitude,
+          active.locations[0].latitude ?? 0,
+          active.locations[0].longitude ?? 0,
+          c.locations[0].latitude ?? 0,
+          c.locations[0].longitude ?? 0,
         );
         return d <= 2; // Radio de 2KM
       })
@@ -71,9 +71,9 @@ export default function CustomerMap({ customers }: { customers: Customer[] }) {
       const c = customers.find((cust) => cust.id === id)!;
       return {
         id: c.id,
-        name: c.alias,
-        lat: c.locations[0].latitude,
-        lng: c.locations[0].longitude,
+        name: c.alias ?? c.name,
+        lat: c.locations[0].latitude ?? 0,
+        lng: c.locations[0].longitude ?? 0,
       };
     });
     return calculateOptimalRoute(selectedPoints);
@@ -145,7 +145,7 @@ export default function CustomerMap({ customers }: { customers: Customer[] }) {
           return c.locations.map((loc) => (
             <Marker
               key={loc.id}
-              position={[loc.latitude, loc.longitude]}
+              position={[loc.latitude ?? 0, loc.longitude ?? 0]}
               icon={icon}
               eventHandlers={{ click: () => setActiveId(c.id) }}
             >
@@ -158,7 +158,7 @@ export default function CustomerMap({ customers }: { customers: Customer[] }) {
                   <div className="flex gap-1 mb-3">
                     <Badge className="text-[9px] bg-blue-100 text-blue-800">
                       <Droplet className="h-2 w-2 mr-1" />{" "}
-                      {c.stats.loanedBottles}
+                      {c.stats?.loanedBottles ?? 0}
                     </Badge>
                   </div>
                   <Button

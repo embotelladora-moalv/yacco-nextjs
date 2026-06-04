@@ -24,7 +24,11 @@ export interface Customer {
   id: string;
   type: CustomerType;
   documentId: string;
+  documentNumber?: string;   // alias de documentId para compatibilidad
   name: string;
+  alias?: string;
+  businessName?: string;
+  categoryTag?: string;
   email?: string;
   phone: string;
   tags: string[];
@@ -34,6 +38,7 @@ export interface Customer {
   debtAmount: number;
   loanedItems: Record<string, number>;
   customPrices: Record<string, number>;
+  stats?: { loanedBottles?: number; totalSales?: number };
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;

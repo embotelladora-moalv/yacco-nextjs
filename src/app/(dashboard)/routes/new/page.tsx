@@ -13,11 +13,11 @@ export default async function NewRoutePage() {
   ]);
 
   // El responsable de la ruta DEBE ser un chofer
-  const drivers = allUsers.filter((u) => u.role === "DRIVER");
+  const drivers = allUsers.filter((u) => u.roles?.includes("DRIVER"));
 
   // El auxiliar puede ser alguien con rol ASSISTANT, o también otro DRIVER
   const assistants = allUsers.filter(
-    (u) => u.role === "ASSISTANT" || u.role === "DRIVER",
+    (u) => u.roles?.includes("ASSISTANT") || u.roles?.includes("DRIVER"),
   );
 
   return (

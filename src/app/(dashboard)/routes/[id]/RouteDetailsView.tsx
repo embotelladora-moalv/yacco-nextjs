@@ -64,7 +64,7 @@ export function RouteDetailsView({
                   Chofer Responsable
                 </p>
                 <p className="font-bold text-slate-900">
-                  {driver?.name} {driver?.lastName}
+                  {driver?.name}
                 </p>
               </div>
             </div>
@@ -79,7 +79,7 @@ export function RouteDetailsView({
                     Auxiliar
                   </p>
                   <p className="font-bold text-slate-900">
-                    {assistant.name} {assistant.lastName}
+                    {assistant.name}
                   </p>
                 </div>
               </div>

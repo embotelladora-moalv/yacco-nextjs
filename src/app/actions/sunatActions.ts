@@ -15,7 +15,7 @@ import {
 } from "@/services/sunat/apiSunatRest";
 import { generateInvoicePdf } from "@/services/sunat/pdfGenerator";
 
-import { EmitirComprobanteUseCase } from "@/core/use-cases/billing/EmitirComprobanteUseCase";
+import { EmitirComprobanteUseCase, EmitirComprobanteResult } from "@/core/use-cases/billing/EmitirComprobanteUseCase";
 import { FirestoreSaleRepository } from "@/services/adapters/FirestoreSaleRepository";
 import { FirestoreCustomerRepository } from "@/services/adapters/FirestoreCustomerRepository";
 import { FirestoreProductRepository } from "@/services/adapters/FirestoreProductRepository";
@@ -33,7 +33,7 @@ import { revalidatePath } from "next/cache";
 export async function emitirComprobanteAction(
   saleIds: string[] | string,
   tipoDocumento: "01" | "03",
-) {
+): Promise<EmitirComprobanteResult> {
   try {
     const idsToProcess = Array.isArray(saleIds) ? saleIds : [saleIds];
 

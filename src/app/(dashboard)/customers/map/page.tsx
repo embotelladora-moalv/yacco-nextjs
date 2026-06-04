@@ -3,23 +3,23 @@ import { MapPin } from "lucide-react";
 import { CustomerMap } from "./CustomerMap";
 
 export default async function CustomerMapPage() {
-  const customers = await customerRepository.getAll();
+  const customers = await customerRepository.getAllCustomers();
 
   // Extraemos solo las ubicaciones que tengan coordenadas registradas
   const mapPins = customers.flatMap((customer) =>
-    customer.locations
-      .filter((loc) => loc.latitude && loc.longitude)
+    (customer.locations ?? [])
+      .filter((loc) => loc.coordinates?.lat && loc.coordinates?.lng)
       .map((loc) => ({
         customerId: customer.id,
         customerName: customer.name,
-        customerType: customer.type,
-        debtAmount: customer.debtAmount,
+        customerType: customer.documentType ?? "OTHER",
+        debtAmount: customer.debtAmount ?? 0,
         locationId: loc.id,
         locationName: loc.name,
-        address: loc.address,
-        latitude: loc.latitude!,
-        longitude: loc.longitude!,
-        isDefault: loc.isDefault,
+        address: loc.address ?? "",
+        latitude: loc.coordinates!.lat,
+        longitude: loc.coordinates!.lng,
+        isDefault: loc.isMain,
       })),
   );
 

@@ -169,7 +169,7 @@ export function LiquidatedRoutesTable({
                 >
                   <option value="ALL">Todos los Choferes</option>
                   {users
-                    .filter((u) => u.role === "DRIVER" || u.role === "ADMIN")
+                    .filter((u) => u.roles?.includes("DRIVER") || u.roles?.includes("ADMIN"))
                     .map((u) => (
                       <option key={u.id} value={u.id}>
                         {u.name}

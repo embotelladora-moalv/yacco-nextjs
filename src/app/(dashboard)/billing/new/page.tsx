@@ -7,8 +7,8 @@ import { ChevronLeft } from "lucide-react";
 
 export default async function NewInvoicePage() {
   const [customers, allOrders] = await Promise.all([
-    customerRepository.getAll(),
-    orderRepository.getAll(),
+    customerRepository.getAllCustomers(),
+    orderRepository.getPendingOrders(),
   ]);
 
   // Extraemos solo los pedidos que NO tienen un billingId asociado (no facturados)

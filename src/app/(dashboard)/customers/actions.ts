@@ -78,6 +78,39 @@ export async function saveCustomerAction(
   }
 }
 
+export async function addContactAction(
+  customerId: string,
+  contact: { name: string; phone: string; role: string },
+) {
+  try {
+    const { randomUUID } = await import("crypto");
+    const customer = await customerRepository.getCustomerById(customerId);
+    if (!customer) return { success: false, error: "Cliente no encontrado" };
+    const contacts = (customer as any).contacts ?? [];
+    contacts.push({ ...contact, id: randomUUID() });
+    await customerRepository.updateCustomer(customerId, { contacts } as any);
+    revalidatePath(`/customers/${customerId}`);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function removeContactAction(customerId: string, contactId: string) {
+  try {
+    const customer = await customerRepository.getCustomerById(customerId);
+    if (!customer) return { success: false, error: "Cliente no encontrado" };
+    const contacts = ((customer as any).contacts ?? []).filter(
+      (c: any) => c.id !== contactId,
+    );
+    await customerRepository.updateCustomer(customerId, { contacts } as any);
+    revalidatePath(`/customers/${customerId}`);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
 export async function toggleCustomerStatusAction(
   id: string,
   isActive: boolean,
