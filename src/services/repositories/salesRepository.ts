@@ -4,28 +4,7 @@ import { DispatchManifest } from "@/core/entities/Dispatch";
 import { SaleFormValues } from "@/core/validations/crmSchemas";
 import { adminDb } from "@/services/firebase/admin";
 import { PaymentFormValues } from "@/core/validations/paymentSchema";
-
-export function serializeFirestoreData(obj: any): any {
-  if (obj === null || obj === undefined) return obj;
-  if (typeof obj !== "object") return obj;
-
-  // Si es un Timestamp de Firebase (tiene la función toDate)
-  if (typeof obj.toDate === "function") {
-    return obj.toDate().toISOString();
-  }
-
-  // Si es un Array, iteramos
-  if (Array.isArray(obj)) {
-    return obj.map((item) => serializeFirestoreData(item));
-  }
-
-  // Si es un objeto regular, iteramos sus llaves
-  const serialized: any = {};
-  for (const [key, value] of Object.entries(obj)) {
-    serialized[key] = serializeFirestoreData(value);
-  }
-  return serialized;
-}
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 const SALES_COLLECTION = "sales";
 const CUSTOMERS_COLLECTION = "customers";
@@ -127,6 +106,8 @@ export const salesRepository = {
         driverId: data.saleType === "PLANT" ? "ADMIN_WEB" : driverId,
         registeredBy: registeredBy,
         customerId: data.customerId,
+        customerName: customer.name || "Cliente Desconocido",
+        customerAlias: customer.alias || "",
         items: data.items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
@@ -224,15 +205,10 @@ export const salesRepository = {
       .get();
 
     return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        ...data,
+      return serializeFirestoreData({
         id: doc.id,
-        createdAt:
-          data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-        updatedAt:
-          data.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-      } as any;
+        ...doc.data(),
+      });
     });
   },
 
@@ -258,15 +234,10 @@ export const salesRepository = {
     const snapshot = await query.get();
 
     return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        ...data,
+      return serializeFirestoreData({
         id: doc.id,
-        createdAt:
-          data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-        updatedAt:
-          data.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-      } as any;
+        ...doc.data(),
+      });
     });
   },
 
@@ -347,15 +318,10 @@ export const salesRepository = {
       .get();
 
     return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        ...data,
+      return serializeFirestoreData({
+        ...doc.data(),
         id: doc.id,
-        createdAt:
-          data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-        updatedAt:
-          data.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-      } as any;
+      });
     });
   },
 
@@ -367,15 +333,10 @@ export const salesRepository = {
       .get();
 
     return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+      return serializeFirestoreData({
         id: doc.id,
-        ...data,
-        createdAt:
-          data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-        cancelledAt: data.cancelledAt?.toDate?.()?.toISOString() || null,
-      };
+        ...doc.data(),
+      });
     });
   },
 
@@ -448,20 +409,20 @@ export const salesRepository = {
       .get();
 
     // 2. Mapeamos TODA la data (incluyendo items) y serializamos fechas.
-    // Listamos explícitamente los campos críticos antes del spread para que
-    // TypeScript pueda inferir el tipo correcto (el spread de DocumentData lo oculta).
     const pendingSales = snapshot.docs.map((doc) => {
       const data = doc.data();
-      return {
+      const serialized = serializeFirestoreData({
         ...data,
         id: doc.id,
+      });
+
+      return {
+        ...serialized,
         customerId: (data.customerId ?? "") as string,
         totalAmount: (data.totalAmount ?? 0) as number,
         issueDate: data.createdAt?.toDate
           ? data.createdAt.toDate().toLocaleDateString("es-PE")
           : "Sin fecha",
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
       };
     });
 

@@ -7,6 +7,7 @@ import { adminAuth, adminDb } from "@/services/firebase/admin";
 import * as admin from "firebase-admin";
 import { salesRepository } from "@/services/repositories/salesRepository";
 import { dispatchRepository } from "@/services/repositories/dispatchRepository";
+import { customerRepository } from "@/services/repositories/customerRepository";
 import { saleSchema, SaleFormValues } from "@/core/validations/crmSchemas";
 import { revalidatePath } from "next/cache";
 
@@ -101,7 +102,17 @@ export async function fetchPaginatedSalesAction(
       lastCreatedAtIso,
       paymentFilter,
     );
-    return { success: true, sales };
+
+    const customerIds = Array.from(
+      new Set(sales.map((s: any) => s.customerId).filter(Boolean)),
+    ) as string[];
+
+    const customersData =
+      customerIds.length > 0
+        ? await customerRepository.getCustomersByIds(customerIds)
+        : {};
+
+    return { success: true, sales, customersData };
   } catch (error: any) {
     console.error("Error en paginación de ventas:", error);
     return { success: false, error: error.message };

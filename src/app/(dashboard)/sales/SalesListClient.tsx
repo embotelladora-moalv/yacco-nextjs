@@ -44,6 +44,15 @@ export function SalesListClient({
   const [isLoading, setIsLoading] = useState(false);
   const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
 
+  // Mapa local para acumular los clientes cargados y evitar N+1
+  const [customerMap, setCustomerMap] = useState<Record<string, Customer>>(() => {
+    const map: Record<string, Customer> = {};
+    customers.forEach((c) => {
+      map[c.id] = c;
+    });
+    return map;
+  });
+
   // --- PAGINACIÓN ESCALABLE (CURSORES) ---
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
@@ -73,7 +82,7 @@ export function SalesListClient({
   }, []);
 
   // --- HELPERS ---
-  const getCustomer = (id: string) => customers.find((c) => c.id === id);
+  const getCustomer = (id: string) => customerMap[id];
   const getProductName = (id: string) =>
     products.find((p) => p.id === id)?.name || "Producto";
 
@@ -139,6 +148,13 @@ export function SalesListClient({
       setSalesList(result.sales);
       setCurrentPage(pageIndex);
       setHasMore(result.sales.length === size);
+
+      if ((result as any).customersData) {
+        setCustomerMap((prev) => ({
+          ...prev,
+          ...(result as any).customersData,
+        }));
+      }
     }
     setIsLoading(false);
   };

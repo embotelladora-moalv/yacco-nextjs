@@ -9,12 +9,21 @@ import { Button } from "@/components/ui/button";
 export const dynamic = "force-dynamic";
 
 export default async function SalesPage() {
-  // Reemplaza la línea donde llamas a getRecentSales(100) por esto:
-  const [sales, customers, products] = await Promise.all([
+  const [sales, products] = await Promise.all([
     salesRepository.getPaginatedSales(10), // <-- Arrancamos solo con la Página 1
-    customerRepository.getAllCustomers(),
     inventoryRepository.getAllProducts(),
   ]);
+
+  const customerIds = Array.from(
+    new Set(sales.map((s) => s.customerId).filter(Boolean)),
+  ) as string[];
+
+  const customersData =
+    customerIds.length > 0
+      ? await customerRepository.getCustomersByIds(customerIds)
+      : {};
+
+  const customers = Object.values(customersData);
 
   const totalRevenue = sales.reduce((acc, sale) => acc + sale.totalAmount, 0);
   const totalCash = sales.reduce(
