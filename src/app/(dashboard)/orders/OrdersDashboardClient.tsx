@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { Order } from "@/core/entities/Order";
 import { Customer } from "@/core/entities/CRM";
 import { DispatchManifest } from "@/core/entities/Dispatch";
@@ -21,7 +22,9 @@ import {
   CheckSquare,
   Edit,
   Trash2,
-  FileBadge2, // <-- Icono para la guía
+  FileBadge2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -30,6 +33,10 @@ interface OrdersDashboardProps {
   customers: Customer[];
   activeManifests: DispatchManifest[];
   products: Product[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  currentCursors: string;
+  currentLimit: number;
 }
 
 export function OrdersDashboardClient({
@@ -37,7 +44,41 @@ export function OrdersDashboardClient({
   customers,
   activeManifests,
   products,
+  nextCursor,
+  hasMore,
+  currentCursors,
+  currentLimit,
 }: OrdersDashboardProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const cursorArray = currentCursors ? currentCursors.split(",") : [];
+  const currentPage = cursorArray.length + 1;
+  const pageSize = currentLimit;
+
+  const navigate = (params: { cursors?: string; limit?: number }) => {
+    const query = new URLSearchParams();
+    const newCursors = params.cursors !== undefined ? params.cursors : currentCursors;
+    if (newCursors) {
+      query.set("cursors", newCursors);
+    }
+    const newLimit = params.limit !== undefined ? params.limit : currentLimit;
+    query.set("limit", String(newLimit));
+
+    router.push(`${pathname}?${query.toString()}`);
+  };
+
+  const handleNextPage = () => {
+    if (!hasMore || !nextCursor) return;
+    const nextCursors = currentCursors ? `${currentCursors},${nextCursor}` : nextCursor;
+    navigate({ cursors: nextCursors });
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage === 1) return;
+    const prevCursors = cursorArray.slice(0, -1).join(",");
+    navigate({ cursors: prevCursors });
+  };
   const [isAssigning, setIsAssigning] = useState(false);
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
   const [bulkManifestId, setBulkManifestId] = useState("");
@@ -290,6 +331,48 @@ export function OrdersDashboardClient({
               </div>
             );
           })}
+        </div>
+
+        {/* CONTROLES DE PAGINACIÓN */}
+        <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 bg-white rounded-2xl border border-slate-200 shadow-sm gap-4 mt-6">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 font-medium">Mostrar:</span>
+            <select
+              className="h-8 px-2 rounded-md border border-slate-200 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-600 bg-white"
+              value={pageSize}
+              onChange={(e) => {
+                navigate({ limit: Number(e.target.value), cursors: "" });
+              }}
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePrevPage}
+              disabled={currentPage === 1}
+              className="shadow-sm h-8"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
+            </Button>
+            <div className="flex items-center px-3 h-8 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-md">
+              Página {currentPage}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleNextPage}
+              disabled={!hasMore || !nextCursor}
+              className="shadow-sm h-8"
+            >
+              Siguiente <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
         </div>
       </div>
 

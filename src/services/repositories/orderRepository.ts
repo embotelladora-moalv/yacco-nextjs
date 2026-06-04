@@ -2,6 +2,8 @@ import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { Order } from "@/core/entities/Order";
 import { OrderFormValues } from "@/core/validations/orderSchema";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
+import { paginate } from "./_pagination";
 
 const ORDERS_COLLECTION = "orders";
 
@@ -33,16 +35,10 @@ export const orderRepository = {
       .get();
 
     return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+      return serializeFirestoreData({
         id: doc.id,
-        ...data,
-        // Serialización segura de fechas para Next.js Client Components
-        expectedDeliveryDate:
-          data.expectedDeliveryDate?.toDate?.()?.toISOString() || null,
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-      } as any;
+        ...doc.data(),
+      });
     });
   },
 
@@ -80,14 +76,16 @@ export const orderRepository = {
     const data = doc.data();
     if (!data) return null;
 
-    return {
+    const serialized = serializeFirestoreData({
       id: doc.id,
       ...data,
+    });
+
+    return {
+      ...serialized,
       expectedDeliveryDate:
         data.expectedDeliveryDate?.toDate?.()?.toISOString().split("T")[0] ||
         null, // Formato YYYY-MM-DD para el form
-      createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-      updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
     } as any;
   },
 
@@ -176,5 +174,80 @@ export const orderRepository = {
    */
   async deleteOrder(id: string): Promise<void> {
     await adminDb.collection(ORDERS_COLLECTION).doc(id).delete();
+  },
+
+  async listPaginated(options: {
+    pageSize: number;
+    cursor?: string;
+    status?: string;
+    customerId?: string;
+    startDate?: string;
+    endDate?: string;
+  }) {
+    let query: admin.firestore.Query = adminDb.collection(ORDERS_COLLECTION);
+
+    if (options.status) {
+      query = query.where("status", "==", options.status);
+    }
+    if (options.customerId) {
+      query = query.where("customerId", "==", options.customerId);
+    }
+    if (options.startDate) {
+      const startTimestamp = admin.firestore.Timestamp.fromDate(new Date(options.startDate));
+      query = query.where("expectedDeliveryDate", ">=", startTimestamp);
+    }
+    if (options.endDate) {
+      const endTimestamp = admin.firestore.Timestamp.fromDate(new Date(options.endDate));
+      query = query.where("expectedDeliveryDate", "<=", endTimestamp);
+    }
+
+    const orderByFields = options.status === "PENDING"
+      ? ["expectedDeliveryDate", "id"]
+      : ["createdAt", "id"];
+
+    if (options.status === "PENDING") {
+      query = query
+        .orderBy("expectedDeliveryDate", "asc")
+        .orderBy("__name__", "asc");
+    } else {
+      query = query
+        .orderBy("createdAt", "desc")
+        .orderBy("__name__", "desc");
+    }
+
+    query = query.select(
+      "id",
+      "customerId",
+      "locationId",
+      "items",
+      "expectedDeliveryDate",
+      "status",
+      "manifestId",
+      "notes",
+      "createdAt"
+    );
+
+    return await paginate<Order>(
+      query,
+      options,
+      orderByFields,
+      (doc) => {
+        const data = doc.data();
+        return serializeFirestoreData({
+          id: doc.id,
+          ...data,
+          items: data.items || [],
+        }) as Order;
+      }
+    );
+  },
+
+  async getPendingOrdersCount(): Promise<number> {
+    const countSnapshot = await adminDb
+      .collection(ORDERS_COLLECTION)
+      .where("status", "==", "PENDING")
+      .count()
+      .get();
+    return countSnapshot.data().count;
   },
 };
