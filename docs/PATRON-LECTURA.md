@@ -87,13 +87,41 @@ export default async function Page({ searchParams }: PageProps) {
 
 ---
 
-## 3. Estimación de Reducción de Lecturas y Costo
+## 3. Entidades Migradas y Estimación de Reducción de Lecturas y Costo
 
-A continuación se muestra el impacto estimado tras la aplicación de este patrón en una base de datos con **21,000 clientes** e historial en producción:
+A continuación se detalla el impacto tras la migración de los módulos principales de **Yacco ERP** en una base de datos con **21,000 clientes** e historial en producción:
 
 | Operación / Carga de Página | Costo Anterior (Lecturas) | Costo Nuevo (Lecturas) | % Reducción de Lecturas |
 | :--- | :--- | :--- | :--- |
-| **Carga de Clientes (`/customers`)** | 21,000 lecturas | 10 (items) + 21 (Count Aggregation) = **31 lecturas** | **99.85%** |
-| **Historial de Ventas (`/sales`)** | 21,000 lecturas (join de clientes) | 10 (ventas) + 10 (Batch-Get clientes) = **20 lecturas** | **99.90%** |
-| **Búsqueda de Cliente** | 21,000 lecturas (filtro en memoria) | **0 lecturas** en Firestore (delegado a Algolia) | **100%** |
+| **Clientes (`/customers`)** | 21,000 lecturas | 10 (items) + 21 (Count Aggregation) = **31 lecturas** | **99.85%** |
+| **Ventas (`/sales`)** | 21,000 lecturas (para N+1 resolvedores en mem) | 10 (ventas) + 10 (Batch-Get clientes) = **20 lecturas** | **99.90%** |
+| **Pedidos (`/orders`)** | 21,000 lecturas (N+1 carga clientes completo) | 10 (pedidos) + 10 (Batch-Get clientes) = **20 lecturas** | **99.90%** |
+| **Cobranzas (`/collections`)** | 21,000 lecturas (carga completa de clientes) | 10 (deudores) + 21 (Count Aggregation) = **31 lecturas** | **99.85%** |
+| **Búsqueda de Clientes** | 21,000 lecturas (filtro en memoria) | **0 lecturas** en Firestore (delegado a Algolia) | **100%** |
 | **Carga de Catálogo de Productos** | Petición cruda a DB en cada req. | Cached en Vercel/Next.js (Revalidate largo) = **0 lecturas** | **100%** (en aciertos de caché) |
+
+---
+
+## 4. Tabla de Índices Compuestos Requeridos
+
+Para soportar las consultas paginadas con ordenamiento estable y filtros, se definieron los siguientes índices compuestos en `firestore.indexes.json`:
+
+| Colección | Campos del Índice | Propósito |
+| :--- | :--- | :--- |
+| `sales` | `isBilled` (ASC), `createdAt` (DESC) | Filtro de facturación SUNAT con orden cronológico |
+| `sales` | `paymentMethod` (ASC), `createdAt` (DESC) | Filtros de tipo de pago con orden cronológico |
+| `sales` | `customerId` (ASC), `createdAt` (DESC) | Historial de compras por cliente ordenado por fecha |
+| `orders` | `status` (ASC), `expectedDeliveryDate` (ASC) | Panel de despacho de pedidos pendientes ordenados por entrega |
+| `orders` | `customerId` (ASC), `expectedDeliveryDate` (ASC) | Reservas por cliente ordenadas por fecha de entrega |
+| `orders` | `status` (ASC), `createdAt` (DESC) | Historial general de pedidos |
+| `customers` | `isActive` (ASC), `debtAmount` (DESC) | Listado de deudores activos ordenados por saldo |
+
+---
+
+## 5. Módulos Pendientes de Migración
+
+Los siguientes módulos no manejan volúmenes masivos de documentos actualmente (manteniéndose cargados de forma simple), pero deben auditarse si el sistema escala:
+- **Despachos (`/dispatch` / `dispatchManifests`)**: Los manifiestos de ruta se cargan por lote y son de naturaleza diaria/semanal.
+- **Flujo de Caja (`/finance` / `cashMovements`)**: Carga los últimos 200 movimientos. Si el número de transacciones diarias aumenta, debe migrarse a cursor.
+- **Kardex / Inventario (`/inventory` / `kardexLogs`)**: El historial de movimientos de inventario puede crecer rápidamente.
+
