@@ -59,10 +59,11 @@ export function RouteTimeline({
         data: pit,
       });
     });
-    if (manifest.status === "LIQUIDATED" && manifest.liquidatedAt) {
+    const liquidationTime = manifest.liquidatedAt || manifest.liquidationDate;
+    if (manifest.status === "LIQUIDATED" && liquidationTime) {
       events.push({
         type: "END",
-        date: new Date(manifest.liquidatedAt),
+        date: new Date(liquidationTime),
         title: "Cierre y Liquidación de Ruta",
         description:
           "El camión retornó a base. Caja cuadrada e inventario sincronizado.",

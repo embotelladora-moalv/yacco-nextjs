@@ -887,6 +887,7 @@ export const dispatchRepository = {
         "assistantId",
         "dispatchDate",
         "liquidatedAt",
+        "liquidationDate",
         "status",
         "realCashReceived",
         "cashReported",

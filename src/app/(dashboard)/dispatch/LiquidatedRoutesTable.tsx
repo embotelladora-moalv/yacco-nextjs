@@ -410,7 +410,7 @@ export function LiquidatedRoutesTable({
                         <span className="text-[9px] font-black bg-emerald-50 text-emerald-600 px-1 rounded uppercase">
                           Liq
                         </span>
-                        {formatDateTime(dispatch.liquidatedAt)}
+                        {formatDateTime(dispatch.liquidatedAt || dispatch.liquidationDate)}
                       </p>
                     </td>
 
