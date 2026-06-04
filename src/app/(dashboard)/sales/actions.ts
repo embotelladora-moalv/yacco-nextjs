@@ -97,11 +97,13 @@ export async function fetchPaginatedSalesAction(
   paymentFilter?: string,
 ) {
   try {
-    const sales = await salesRepository.getPaginatedSales(
-      limitCount,
-      lastCreatedAtIso,
-      paymentFilter,
-    );
+    const paginatedResult = await salesRepository.listPaginated({
+      pageSize: limitCount,
+      cursor: lastCreatedAtIso,
+      paymentFilter: paymentFilter,
+    });
+
+    const sales = paginatedResult.items;
 
     const customerIds = Array.from(
       new Set(sales.map((s: any) => s.customerId).filter(Boolean)),
@@ -112,7 +114,13 @@ export async function fetchPaginatedSalesAction(
         ? await customerRepository.getCustomersByIds(customerIds)
         : {};
 
-    return { success: true, sales, customersData };
+    return {
+      success: true,
+      sales,
+      customersData,
+      nextCursor: paginatedResult.nextCursor,
+      hasMore: paginatedResult.hasMore,
+    };
   } catch (error: any) {
     console.error("Error en paginación de ventas:", error);
     return { success: false, error: error.message };

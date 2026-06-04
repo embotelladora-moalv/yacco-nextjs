@@ -5,14 +5,42 @@ import { SalesListClient } from "./SalesListClient";
 import { ShoppingCart, Plus } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { Customer } from "@/core/entities/CRM";
 
 export const dynamic = "force-dynamic";
 
-export default async function SalesPage() {
-  const [sales, products] = await Promise.all([
-    salesRepository.getPaginatedSales(10), // <-- Arrancamos solo con la Página 1
+interface PageProps {
+  searchParams: Promise<{
+    cursors?: string;
+    limit?: string;
+    filter?: string;
+  }>;
+}
+
+export default async function SalesPage({ searchParams }: PageProps) {
+  const resolvedSearchParams = await searchParams;
+  const cursorsParam = resolvedSearchParams.cursors || "";
+  const limit = resolvedSearchParams.limit ? parseInt(resolvedSearchParams.limit, 10) : 10;
+  const filter = resolvedSearchParams.filter || "ALL";
+
+  // Descomponemos la pila de cursores de la URL. El cursor activo para Firestore es el último
+  const cursorArray = cursorsParam ? cursorsParam.split(",") : [];
+  const currentCursor = cursorArray[cursorArray.length - 1];
+
+  const [paginatedData, metrics, products] = await Promise.all([
+    salesRepository.listPaginated({
+      pageSize: limit,
+      cursor: currentCursor,
+      paymentFilter: filter,
+    }),
+    salesRepository.getSalesMetrics({
+      paymentFilter: filter,
+    }),
     inventoryRepository.getAllProducts(),
   ]);
+
+  const { items: sales, nextCursor, hasMore } = paginatedData;
+  const { totalRevenue, totalCash, totalDigital } = metrics;
 
   const customerIds = Array.from(
     new Set(sales.map((s) => s.customerId).filter(Boolean)),
@@ -23,17 +51,7 @@ export default async function SalesPage() {
       ? await customerRepository.getCustomersByIds(customerIds)
       : {};
 
-  const customers = Object.values(customersData);
-
-  const totalRevenue = sales.reduce((acc, sale) => acc + sale.totalAmount, 0);
-  const totalCash = sales.reduce(
-    (acc, sale) => acc + (sale.cashReceived || 0),
-    0,
-  );
-  const totalDigital = sales.reduce(
-    (acc, sale) => acc + (sale.digitalReceived || 0),
-    0,
-  );
+  const customers = Object.values(customersData) as Customer[];
 
   return (
     <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4 sm:px-6 space-y-8">
@@ -83,6 +101,11 @@ export default async function SalesPage() {
         sales={sales}
         customers={customers}
         products={products}
+        nextCursor={nextCursor}
+        hasMore={hasMore}
+        currentCursors={cursorsParam}
+        currentLimit={limit}
+        currentFilter={filter}
       />
     </div>
   );

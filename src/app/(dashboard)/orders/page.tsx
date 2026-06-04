@@ -6,17 +6,50 @@ import { OrdersDashboardClient } from "./OrdersDashboardClient";
 import { Button } from "@/components/ui/button";
 import { Plus, ListChecks } from "lucide-react";
 import Link from "next/link";
+import { Customer } from "@/core/entities/CRM";
 
 export const dynamic = "force-dynamic";
 
-export default async function OrdersPage() {
+interface PageProps {
+  searchParams: Promise<{
+    cursors?: string;
+    limit?: string;
+  }>;
+}
+
+export default async function OrdersPage({ searchParams }: PageProps) {
+  const resolvedSearchParams = await searchParams;
+  const cursorsParam = resolvedSearchParams.cursors || "";
+  const limit = resolvedSearchParams.limit ? parseInt(resolvedSearchParams.limit, 10) : 10;
+
+  // Descomponemos la pila de cursores de la URL
+  const cursorArray = cursorsParam ? cursorsParam.split(",") : [];
+  const currentCursor = cursorArray[cursorArray.length - 1];
+
   // Consultas en paralelo para optimizar la carga
-  const [pendingOrders, customers, manifests, products] = await Promise.all([
-    orderRepository.getPendingOrders(),
-    customerRepository.getAllCustomers(),
+  const [paginatedOrders, manifests, products] = await Promise.all([
+    orderRepository.listPaginated({
+      pageSize: limit,
+      cursor: currentCursor,
+      status: "PENDING",
+    }),
     dispatchRepository.getRecentDispatches(),
     inventoryRepository.getAllProducts(),
   ]);
+
+  const { items: pendingOrders, nextCursor, hasMore } = paginatedOrders;
+
+  // Resolvemos N+1 de los clientes en lote
+  const customerIds = Array.from(
+    new Set(pendingOrders.map((o) => o.customerId).filter(Boolean)),
+  ) as string[];
+
+  const customersData =
+    customerIds.length > 0
+      ? await customerRepository.getCustomersByIds(customerIds)
+      : {};
+
+  const customers = Object.values(customersData) as Customer[];
 
   // Filtramos solo los camiones que pueden recibir pedidos (PENDING o ON_ROUTE)
   const activeManifests = manifests.filter(
@@ -52,6 +85,10 @@ export default async function OrdersPage() {
         customers={customers}
         activeManifests={activeManifests}
         products={products}
+        nextCursor={nextCursor}
+        hasMore={hasMore}
+        currentCursors={cursorsParam}
+        currentLimit={limit}
       />
     </div>
   );

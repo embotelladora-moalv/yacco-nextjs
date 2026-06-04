@@ -4,12 +4,31 @@ import { HandCoins } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-export default async function CollectionsPage() {
-  // Obtenemos a todos los clientes (podrías optimizarlo en el repositorio luego para que solo traiga debtAmount > 0 directamente desde Firebase)
-  const allCustomers = await customerRepository.getAllCustomers();
+interface PageProps {
+  searchParams: Promise<{
+    cursors?: string;
+    limit?: string;
+    q?: string;
+  }>;
+}
 
-  // Filtramos a los deudores
-  const debtors = allCustomers.filter((c) => (c.debtAmount || 0) > 0);
+export default async function CollectionsPage({ searchParams }: PageProps) {
+  const resolvedSearchParams = await searchParams;
+  const cursorsParam = resolvedSearchParams.cursors || "";
+  const limit = resolvedSearchParams.limit ? parseInt(resolvedSearchParams.limit, 10) : 10;
+  const q = resolvedSearchParams.q || "";
+
+  // Descomponemos la pila de cursores de la URL
+  const cursorArray = cursorsParam ? cursorsParam.split(",") : [];
+  const currentCursor = cursorArray[cursorArray.length - 1];
+
+  const paginatedData = await customerRepository.listDebtorsPaginated({
+    pageSize: limit,
+    cursor: currentCursor,
+    search: q,
+  });
+
+  const { items: debtors, nextCursor, hasMore, totalCount, totalDebtAmount } = paginatedData;
 
   return (
     <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4 sm:px-6 space-y-8">
@@ -26,7 +45,16 @@ export default async function CollectionsPage() {
       </div>
 
       {/* DASHBOARD CLIENTE */}
-      <CollectionsClient debtors={debtors} />
+      <CollectionsClient
+        debtors={debtors}
+        nextCursor={nextCursor}
+        hasMore={hasMore}
+        currentCursors={cursorsParam}
+        currentLimit={limit}
+        currentSearch={q}
+        totalCount={totalCount}
+        totalDebtAmount={totalDebtAmount}
+      />
     </div>
   );
 }
