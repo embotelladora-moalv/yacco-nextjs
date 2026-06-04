@@ -2,6 +2,7 @@ import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { DailyRouteFormValues } from "@/core/validations/dailyRouteSchema";
 import { DailyRoute } from "@/core/entities/DailyRoute"; // Asumiendo que creaste la interfaz que discutimos
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 const COLLECTION = "daily_routes";
 
@@ -34,14 +35,10 @@ export const dailyRouteRepository = {
       .get();
 
     return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+      return serializeFirestoreData({
         id: doc.id,
-        ...data,
-        date: data.date?.toDate() || new Date(),
-        createdAt: data.createdAt?.toDate() || new Date(),
-        updatedAt: data.updatedAt?.toDate() || new Date(),
-      } as DailyRoute;
+        ...doc.data(),
+      });
     });
   },
 
@@ -53,12 +50,9 @@ export const dailyRouteRepository = {
     if (!doc.exists) return null;
 
     const data = doc.data()!;
-    return {
+    return serializeFirestoreData({
       id: doc.id,
       ...data,
-      date: data.date?.toDate() || new Date(),
-      createdAt: data.createdAt?.toDate() || new Date(),
-      updatedAt: data.updatedAt?.toDate() || new Date(),
-    } as DailyRoute;
+    });
   },
 };

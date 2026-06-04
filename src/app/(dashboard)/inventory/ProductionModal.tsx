@@ -39,9 +39,9 @@ export function ProductionModal({ products }: ProductionModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, setIsPending] = useState(false);
 
-  // Solo productos que se pueden llenar (no accesorios)
+  // Solo productos que se pueden llenar (no accesorios) y que estén activos
   const producibleProducts = products.filter(
-    (p) => p.operationalCategory !== "ACCESSORY",
+    (p) => p.operationalCategory !== "ACCESSORY" && p.isActive,
   );
 
   const form = useForm<ProductionBatchFormValues>({

@@ -1,6 +1,6 @@
-// src/services/repositories/categoryRepository.ts
 import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 /**
  * Interface para Categorías de Clientes
@@ -28,12 +28,10 @@ export const categoryRepository = {
         .get();
 
       return snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
+        return serializeFirestoreData({
           id: doc.id,
-          ...data,
-          createdAt: data.createdAt?.toDate(),
-        } as CustomerCategory;
+          ...doc.data(),
+        });
       });
     } catch (error) {
       console.error("Error fetching categories:", error);

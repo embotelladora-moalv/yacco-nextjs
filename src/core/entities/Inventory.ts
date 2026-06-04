@@ -72,9 +72,26 @@ export interface KardexLog {
 
   // Trazabilidad
   referenceId: string; // El ID del Lote, de la Merma, de la Venta o de la Compra
-  referenceType: "PRODUCTION" | "SHRINKAGE" | "SALE" | "RETURN" | "PURCHASE";
+  referenceType:
+    | "PRODUCTION"
+    | "SHRINKAGE"
+    | "SALE"
+    | "RETURN"
+    | "PURCHASE"
+    | "DISPATCH"
+    | "ROUTE_RETURN"
+    | "EMPTY_RETURN_LIQUIDATION"
+    | "EMPTY_RETURN_PITSTOP"
+    | "DISPATCH_RELOAD"
+    | "DISPATCH_RELOAD_RETURN";
 
   previousStock: number;
   newStock: number;
   createdAt: Date;
+
+  // Nuevos campos avanzados (Inglés)
+  movementType?: "SALE" | "DISPATCH" | "PRODUCTION" | "LOSS" | "ADJUSTMENT" | "PURCHASE" | "RETURN";
+  delta?: number;
+  resultingBalance?: number;
+  userId?: string;
 }

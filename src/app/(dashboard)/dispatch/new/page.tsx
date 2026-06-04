@@ -5,6 +5,8 @@ import { NewDispatchForm } from "../NewDispatchForm";
 
 export const dynamic = "force-dynamic";
 
+import { serializeFirestoreData } from "@/services/firebase/serialization";
+
 export default async function NewDispatchPage() {
   const products = await inventoryRepository.getAllProducts();
 
@@ -40,23 +42,17 @@ export default async function NewDispatchPage() {
     });
 
     drivers = usersSnapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+      return serializeFirestoreData({
         id: doc.id,
-        ...data,
-        createdAt: data.createdAt?.toDate()?.toISOString() || null,
-        updatedAt: data.updatedAt?.toDate()?.toISOString() || null,
-      };
+        ...doc.data(),
+      });
     });
 
     trucks = trucksSnapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+      return serializeFirestoreData({
         id: doc.id,
-        ...data,
-        createdAt: data.createdAt?.toDate()?.toISOString() || null,
-        updatedAt: data.updatedAt?.toDate()?.toISOString() || null,
-      };
+        ...doc.data(),
+      });
     });
   } catch (error) {
     console.error("Error al obtener catálogos de despacho:", error);

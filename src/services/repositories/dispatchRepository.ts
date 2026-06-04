@@ -3,6 +3,8 @@ import admin from "firebase-admin";
 import { DispatchManifest, DispatchItem } from "@/core/entities/Dispatch";
 import { Product } from "@/core/entities/Inventory";
 import { orderRepository } from "./orderRepository";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
+import { paginate } from "./_pagination";
 
 const DISPATCH_COLLECTION = "dispatchManifests";
 const PRODUCTION_COLLECTION = "productionBatches";
@@ -130,6 +132,11 @@ export const dispatchRepository = {
             previousStock: productData.stockFilled,
             newStock: newFilledStock,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            // Nuevos campos
+            movementType: "DISPATCH",
+            delta: -item.quantityRequested,
+            resultingBalance: newFilledStock,
+            userId: dispatcherId || "SYSTEM",
           },
         });
       }
@@ -201,16 +208,11 @@ export const dispatchRepository = {
 
     return snapshot.docs.map((doc) => {
       const data = doc.data();
-      return {
+      return serializeFirestoreData({
         id: doc.id,
         ...data,
-        items: data.items || data.loadedItems || [], // <-- Salvavidas para datos antiguos
-        dispatchDate: data.dispatchDate?.toDate()?.toISOString(),
-        liquidationDate: data.liquidationDate?.toDate()?.toISOString(),
-        liquidatedAt: data.liquidatedAt?.toDate()?.toISOString(),
-        createdAt: data.createdAt?.toDate()?.toISOString(),
-        updatedAt: data.updatedAt?.toDate()?.toISOString(),
-      } as any;
+        items: data.items || data.loadedItems || [],
+      });
     });
   },
 
@@ -227,16 +229,11 @@ export const dispatchRepository = {
 
     return snapshot.docs.map((doc) => {
       const data = doc.data();
-      return {
+      return serializeFirestoreData({
         id: doc.id,
         ...data,
-        items: data.items || data.loadedItems || [], // <-- Salvavidas para datos antiguos
-        dispatchDate: data.dispatchDate?.toDate()?.toISOString(),
-        liquidationDate: data.liquidationDate?.toDate()?.toISOString(),
-        liquidatedAt: data.liquidatedAt?.toDate()?.toISOString(),
-        createdAt: data.createdAt?.toDate()?.toISOString(),
-        updatedAt: data.updatedAt?.toDate()?.toISOString(),
-      } as any;
+        items: data.items || data.loadedItems || [],
+      });
     });
   },
 
@@ -388,6 +385,11 @@ export const dispatchRepository = {
               previousStock: currentFilled,
               newStock: newFilledStock,
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              // Nuevos campos
+              movementType: "RETURN",
+              delta: reportedItem.quantityReturnedFull,
+              resultingBalance: newFilledStock,
+              userId: manifestData?.dispatcherId || manifestData?.driverId || "SYSTEM",
             },
           });
         }
@@ -447,6 +449,11 @@ export const dispatchRepository = {
             previousStock: currentEmpty,
             newStock: newEmptyStock,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            // Nuevos campos
+            movementType: "RETURN",
+            delta: emptyReturn.quantityReturned,
+            resultingBalance: newEmptyStock,
+            userId: manifestData?.dispatcherId || manifestData?.driverId || "SYSTEM",
           },
         });
       }
@@ -488,16 +495,11 @@ export const dispatchRepository = {
     if (!doc.exists) return null;
 
     const data = doc.data();
-    return {
+    return serializeFirestoreData({
       id: doc.id,
       ...data,
-      items: data?.items || data?.loadedItems || [], // <-- Salvavidas para datos antiguos
-      dispatchDate: data?.dispatchDate?.toDate()?.toISOString(),
-      liquidationDate: data?.liquidationDate?.toDate()?.toISOString(),
-      liquidatedAt: data?.liquidatedAt?.toDate()?.toISOString(),
-      createdAt: data?.createdAt?.toDate()?.toISOString(),
-      updatedAt: data?.updatedAt?.toDate()?.toISOString(),
-    };
+      items: data?.items || data?.loadedItems || [],
+    });
   },
 
   /**
@@ -517,17 +519,10 @@ export const dispatchRepository = {
       .get();
 
     return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+      return serializeFirestoreData({
         id: doc.id,
-        ...data,
-        // Serialización segura para Next.js
-        expectedDeliveryDate:
-          data.expectedDeliveryDate?.toDate?.()?.toISOString() || null,
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-        deliveredAt: data.deliveredAt?.toDate?.()?.toISOString() || null,
-      };
+        ...doc.data(),
+      });
     });
   },
 
@@ -662,6 +657,11 @@ export const dispatchRepository = {
             previousStock: productData.stockFilled,
             newStock: newFilledStock,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            // Nuevos campos
+            movementType: "DISPATCH",
+            delta: -item.quantityRequested,
+            resultingBalance: newFilledStock,
+            userId: currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
           },
         });
       }
@@ -706,6 +706,11 @@ export const dispatchRepository = {
             previousStock: currentFilled,
             newStock: newFilledStock,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            // Nuevos campos
+            movementType: "RETURN",
+            delta: retFull.quantity,
+            resultingBalance: newFilledStock,
+            userId: currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
           },
         });
       }
@@ -763,6 +768,11 @@ export const dispatchRepository = {
             previousStock: currentEmpty,
             newStock: newEmptyStock,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            // Nuevos campos
+            movementType: "RETURN",
+            delta: emptyReturn.quantity,
+            resultingBalance: newEmptyStock,
+            userId: currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
           },
         });
       }
@@ -841,5 +851,92 @@ export const dispatchRepository = {
 
       transaction.update(manifestRef, manifestUpdates);
     });
+  },
+
+  async listPaginated(options: {
+    pageSize: number;
+    cursor?: string;
+    status?: "ON_ROUTE" | "LIQUIDATED" | "ALL";
+    driverId?: string;
+    startDate?: string;
+    endDate?: string;
+  }) {
+    let query: admin.firestore.Query = adminDb.collection(DISPATCH_COLLECTION);
+
+    if (options.status && options.status !== "ALL") {
+      query = query.where("status", "==", options.status);
+    }
+    if (options.driverId && options.driverId !== "ALL") {
+      query = query.where("driverId", "==", options.driverId);
+    }
+    if (options.startDate) {
+      const startTimestamp = admin.firestore.Timestamp.fromDate(new Date(`${options.startDate}T00:00:00`));
+      query = query.where("dispatchDate", ">=", startTimestamp);
+    }
+    if (options.endDate) {
+      const endTimestamp = admin.firestore.Timestamp.fromDate(new Date(`${options.endDate}T23:59:59`));
+      query = query.where("dispatchDate", "<=", endTimestamp);
+    }
+
+    query = query
+      .select(
+        "id",
+        "manifestNumber",
+        "truckPlate",
+        "driverId",
+        "assistantId",
+        "dispatchDate",
+        "liquidatedAt",
+        "status",
+        "realCashReceived",
+        "cashReported",
+        "items",
+        "returnedEmpties",
+        "notes"
+      )
+      .orderBy("dispatchDate", "desc")
+      .orderBy("__name__", "desc");
+
+    return await paginate<DispatchManifest>(
+      query,
+      options,
+      ["dispatchDate", "id"],
+      (doc) => {
+        const data = doc.data();
+        return serializeFirestoreData({
+          id: doc.id,
+          ...data,
+          items: data.items || data.loadedItems || [],
+          returnedEmpties: data.returnedEmpties || [],
+        }) as DispatchManifest;
+      }
+    );
+  },
+
+  async getCount(options: {
+    status?: "ON_ROUTE" | "LIQUIDATED" | "ALL";
+    driverId?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<number> {
+    let query: admin.firestore.Query = adminDb.collection(DISPATCH_COLLECTION);
+
+    if (options.status && options.status !== "ALL") {
+      query = query.where("status", "==", options.status);
+    }
+    if (options.driverId && options.driverId !== "ALL") {
+      query = query.where("driverId", "==", options.driverId);
+    }
+    if (options.startDate) {
+      const startTimestamp = admin.firestore.Timestamp.fromDate(new Date(`${options.startDate}T00:00:00`));
+      query = query.where("dispatchDate", ">=", startTimestamp);
+    }
+    if (options.endDate) {
+      const endTimestamp = admin.firestore.Timestamp.fromDate(new Date(`${options.endDate}T23:59:59`));
+      query = query.where("dispatchDate", "<=", endTimestamp);
+    }
+
+    const snapshot = await query.count().get();
+    return snapshot.data().count;
   },
 };

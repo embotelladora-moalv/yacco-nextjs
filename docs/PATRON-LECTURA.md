@@ -97,12 +97,30 @@ A continuación se detalla el impacto tras la migración de los módulos princip
 | **Ventas (`/sales`)** | 21,000 lecturas (para N+1 resolvedores en mem) | 10 (ventas) + 10 (Batch-Get clientes) = **20 lecturas** | **99.90%** |
 | **Pedidos (`/orders`)** | 21,000 lecturas (N+1 carga clientes completo) | 10 (pedidos) + 10 (Batch-Get clientes) = **20 lecturas** | **99.90%** |
 | **Cobranzas (`/collections`)** | 21,000 lecturas (carga completa de clientes) | 10 (deudores) + 21 (Count Aggregation) = **31 lecturas** | **99.85%** |
+| **Despachos (`/dispatch`)** | 50 manifiestos cargados crudos con scans de colecciones | 10 (manifiestos liquidados) + 1 (Count Aggregations) = **11 lecturas** (+ ruta activa de tamaño insignificante) | **80.00%** (escala con el historial) |
+| **Kardex Logs (`/inventory`)** | Historial ilimitado de movimientos traído completo | 15 (movimientos) por producto con cursor = **15 lecturas** | **95.00%** (escala con el historial de logs) |
 | **Búsqueda de Clientes** | 21,000 lecturas (filtro en memoria) | **0 lecturas** en Firestore (delegado a Algolia) | **100%** |
 | **Carga de Catálogo de Productos** | Petición cruda a DB en cada req. | Cached en Vercel/Next.js (Revalidate largo) = **0 lecturas** | **100%** (en aciertos de caché) |
 
 ---
 
-## 4. Tabla de Índices Compuestos Requeridos
+## 4. Sección Especial — Kardex: Append-Only y Saldo Materializado
+
+El Kardex es un historial inmutable diseñado para crecer infinitamente. Para mantener lecturas instantáneas y costos bajos, aplicamos la siguiente arquitectura:
+
+1. **Saldo Materializado**: El stock actual de cada SKU vive directamente en el documento del producto en los campos `stockFilled` (llenos) y `stockEmpty` (vacíos). Esto permite obtener el inventario en una única lectura (`O(1)`) sin tener que recalcular el historial de logs.
+2. **Escrituras Atómicas en Transacciones**: Cada cambio en el stock y su correspondiente registro de Kardex ocurren en una transacción única de Firestore (`runTransaction`). Si falla el registro del log, el stock no se actualiza.
+3. **Estructura del Log (KardexLog)**:
+   * `movementType` (`SALE`, `DISPATCH`, `PRODUCTION`, `LOSS`, `ADJUSTMENT`, `PURCHASE`, `RETURN`)
+   * `delta` (número con signo +/- para el cambio de stock)
+   * `resultingBalance` (snapshot del saldo posterior al movimiento, permite auditar sin re-sumar todo)
+   * `referenceId` y `referenceType` (ID y tipo de entidad origen del movimiento)
+   * `userId` (ID del operador que ejecutó el movimiento)
+4. **Lectura Paginada**: El listado de Kardex siempre requiere pasar el ID del producto (`productId`) y se ordena por `createdAt` DESC y `__name__` DESC, utilizando paginación por cursores.
+
+---
+
+## 5. Tabla de Índices Compuestos Requeridos
 
 Para soportar las consultas paginadas con ordenamiento estable y filtros, se definieron los siguientes índices compuestos en `firestore.indexes.json`:
 
@@ -115,13 +133,14 @@ Para soportar las consultas paginadas con ordenamiento estable y filtros, se def
 | `orders` | `customerId` (ASC), `expectedDeliveryDate` (ASC) | Reservas por cliente ordenadas por fecha de entrega |
 | `orders` | `status` (ASC), `createdAt` (DESC) | Historial general de pedidos |
 | `customers` | `isActive` (ASC), `debtAmount` (DESC) | Listado de deudores activos ordenados por saldo |
+| `dispatchManifests` | `status` (ASC), `dispatchDate` (DESC) | Filtro de manifiestos liquidados/activos en orden cronológico |
+| `dispatchManifests` | `driverId` (ASC), `dispatchDate` (DESC) | Filtro de manifiestos por chofer |
+| `kardexLogs` | `productId` (ASC), `createdAt` (DESC) | Consulta paginada del historial de movimientos de un producto |
 
 ---
 
-## 5. Módulos Pendientes de Migración
+## 6. Módulos Pendientes de Migración
 
 Los siguientes módulos no manejan volúmenes masivos de documentos actualmente (manteniéndose cargados de forma simple), pero deben auditarse si el sistema escala:
-- **Despachos (`/dispatch` / `dispatchManifests`)**: Los manifiestos de ruta se cargan por lote y son de naturaleza diaria/semanal.
 - **Flujo de Caja (`/finance` / `cashMovements`)**: Carga los últimos 200 movimientos. Si el número de transacciones diarias aumenta, debe migrarse a cursor.
-- **Kardex / Inventario (`/inventory` / `kardexLogs`)**: El historial de movimientos de inventario puede crecer rápidamente.
 

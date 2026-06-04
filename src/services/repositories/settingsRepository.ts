@@ -1,6 +1,7 @@
 import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { SystemSettings } from "@/core/entities/SystemSettings";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 // ACTUALIZADO: Ahora apuntamos a la colección unificada que creamos en el seeder
 const SETTINGS_DOC = "systemSettings/config";
@@ -32,14 +33,14 @@ export const settingsRepository = {
         ...defaultSettings,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-      return defaultSettings;
+      return defaultSettings as any;
     }
 
     const data = doc.data()!;
 
     // Mapeo seguro: Si el documento existe pero le falta alguna lista (porque la acabamos de inventar),
     // devolvemos un arreglo vacío o por defecto para que el .map() en el frontend no explote.
-    return {
+    return serializeFirestoreData({
       clientTags: data.clientTags || [],
       packagingTypes: data.packagingTypes || [],
       productionWasteReasons: data.productionWasteReasons || [],
@@ -47,8 +48,8 @@ export const settingsRepository = {
       bottleChangeReasons: data.bottleChangeReasons || [],
       debtReasons: data.debtReasons || [],
       maquilaBrands: data.maquilaBrands || [], // <--- Aseguramos que siempre exista este campo
-      updatedAt: data.updatedAt?.toDate() || new Date(),
-    } as SystemSettings;
+      updatedAt: data.updatedAt,
+    }) as any;
   },
 
   /**

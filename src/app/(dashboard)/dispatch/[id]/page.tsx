@@ -7,6 +7,8 @@ import { DispatchDetailsClient } from "./DispatchDetailsClient";
 
 export const dynamic = "force-dynamic";
 
+import { serializeFirestoreData } from "@/services/firebase/serialization";
+
 export default async function DispatchDetailsPage({
   params,
 }: {
@@ -18,22 +20,17 @@ export default async function DispatchDetailsPage({
   const manifest = await dispatchRepository.getDispatchById(manifestId);
   if (!manifest) notFound();
 
-  const safeManifest = {
-    ...manifest,
-    liquidatedAt: manifest.liquidatedAt?.toDate
-      ? manifest.liquidatedAt.toDate().toISOString()
-      : manifest.liquidatedAt,
-  };
-
   const products = await inventoryRepository.getAllProducts();
 
   // 🔥 NUEVO: Traemos a TODOS los usuarios para que el Timeline traduzca los IDs a Nombres
   const usersSnap = await adminDb.collection("users").get();
-  const users = usersSnap.docs.map((doc) => ({
-    id: doc.id,
-    name: doc.data().name || "Sin nombre",
-    role: doc.data().role || "USER",
-  }));
+  const users = usersSnap.docs.map((doc) => {
+    return serializeFirestoreData({
+      id: doc.id,
+      name: doc.data().name || "Sin nombre",
+      role: doc.data().role || "USER",
+    });
+  });
 
   const driverName =
     users.find((u) => u.id === manifest.driverId)?.name || "Chofer Desconocido";
@@ -46,14 +43,10 @@ export default async function DispatchDetailsPage({
     .where("manifestId", "==", manifestId)
     .get();
   const sales = salesSnap.docs.map((doc) => {
-    const data = doc.data();
-    return {
+    return serializeFirestoreData({
       id: doc.id,
-      ...data,
-      createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-      updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-      deliveredAt: data.deliveredAt?.toDate?.()?.toISOString() || null,
-    } as any;
+      ...doc.data(),
+    });
   });
 
   const customerIds = Array.from(
@@ -70,7 +63,7 @@ export default async function DispatchDetailsPage({
   return (
     <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4 sm:px-6">
       <DispatchDetailsClient
-        manifest={safeManifest}
+        manifest={manifest}
         products={products}
         driverName={driverName}
         orders={assignedOrders}

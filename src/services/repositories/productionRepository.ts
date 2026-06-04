@@ -1,6 +1,7 @@
 import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { ProductionBatchValues } from "@/core/validations/productionSchema";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 export const productionRepository = {
   /**
@@ -54,11 +55,11 @@ export const productionRepository = {
       .limit(limit)
       .get();
 
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      productionDate: doc.data().productionDate?.toDate(),
-      createdAt: doc.data().createdAt?.toDate(),
-    }));
+    return snapshot.docs.map((doc) =>
+      serializeFirestoreData({
+        id: doc.id,
+        ...doc.data(),
+      }),
+    );
   },
 };

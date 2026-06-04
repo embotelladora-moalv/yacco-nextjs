@@ -2,6 +2,7 @@ import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { BillingFormValues } from "@/core/validations/billingSchema";
 import { Invoice } from "@/core/entities/Invoice";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 const COLLECTION = "invoices";
 
@@ -56,13 +57,10 @@ export const billingRepository = {
       .orderBy("createdAt", "desc")
       .get();
     return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+      return serializeFirestoreData({
         id: doc.id,
-        ...data,
-        issueDate: data.issueDate?.toDate() || new Date(),
-        createdAt: data.createdAt?.toDate() || new Date(),
-      } as Invoice;
+        ...doc.data(),
+      });
     });
   },
 };

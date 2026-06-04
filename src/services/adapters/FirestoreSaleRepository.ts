@@ -1,12 +1,13 @@
 import { ISaleRepository } from "@/core/use-cases/sales/ISaleRepository";
 import { Sale } from "@/core/entities/CRM";
 import { adminDb } from "@/services/firebase/admin";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 export class FirestoreSaleRepository implements ISaleRepository {
   async getById(id: string): Promise<Sale | null> {
     const doc = await adminDb.collection("sales").doc(id).get();
     if (!doc.exists) return null;
-    return { id: doc.id, ...doc.data() } as Sale;
+    return serializeFirestoreData({ id: doc.id, ...doc.data() });
   }
 
   async updateBilledStatus(ids: string[], documentId: string): Promise<void> {
