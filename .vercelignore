@@ -1,0 +1,15 @@
+# Vercel solo necesita la app Next.js.
+# Cloud Functions se deployan aparte a Firebase.
+
+functions/
+scripts/
+docs/
+firebase-data/
+*.xlsx
+*.pem
+keys/
+*service-account*.json
+serviceAccount.json
+CLAUDE.md
+AGENTS.md
+firestore-debug.log
