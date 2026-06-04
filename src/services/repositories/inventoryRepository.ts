@@ -6,6 +6,8 @@ import {
   ShrinkageLog,
   KardexLog,
 } from "@/core/entities/Inventory";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
+import { unstable_cache, revalidateTag } from "next/cache";
 
 const PRODUCTS_COLLECTION = "products";
 const KARDEX_COLLECTION = "kardexLogs";
@@ -16,21 +18,22 @@ export const inventoryRepository = {
   // ----------------------------------------------------------------
   // 1. GESTIÓN DE CATÁLOGO DE PRODUCTOS
   // ----------------------------------------------------------------
-  async getAllProducts(): Promise<Product[]> {
-    const snapshot = await adminDb
-      .collection(PRODUCTS_COLLECTION)
-      .orderBy("name", "asc")
-      .get();
-    return snapshot.docs.map(
-      (doc) =>
-        ({
+  getAllProducts: unstable_cache(
+    async (): Promise<Product[]> => {
+      const snapshot = await adminDb
+        .collection(PRODUCTS_COLLECTION)
+        .orderBy("name", "asc")
+        .get();
+      return snapshot.docs.map((doc) =>
+        serializeFirestoreData({
           id: doc.id,
           ...doc.data(),
-          createdAt: doc.data().createdAt?.toDate(),
-          updatedAt: doc.data().updatedAt?.toDate(),
-        }) as Product,
-    );
-  },
+        }),
+      );
+    },
+    ["products-catalog"],
+    { revalidate: 3600, tags: ["products"] }
+  ),
 
   async createProduct(data: Partial<Product>): Promise<string> {
     const ref = adminDb.collection(PRODUCTS_COLLECTION).doc();
@@ -41,6 +44,7 @@ export const inventoryRepository = {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+    revalidateTag("products", "max");
     return ref.id;
   },
 
@@ -80,6 +84,7 @@ export const inventoryRepository = {
       };
       transaction.set(kardexRef, kardexEntry);
     });
+    revalidateTag("products", "max");
   },
 
   // ----------------------------------------------------------------
@@ -198,6 +203,7 @@ export const inventoryRepository = {
         createdAt: new Date(),
       });
     });
+    revalidateTag("products", "max");
   },
 
   // ----------------------------------------------------------------
@@ -251,6 +257,7 @@ export const inventoryRepository = {
         createdAt: new Date(),
       });
     });
+    revalidateTag("products", "max");
   },
 
   // ----------------------------------------------------------------
@@ -264,15 +271,12 @@ export const inventoryRepository = {
       .limit(100) // Traemos los últimos 100 movimientos por rendimiento
       .get();
 
-    return snapshot.docs.map(
-      (doc) =>
-        ({
-          id: doc.id,
-          ...doc.data(),
-          // Serializamos la fecha para que Next.js no se queje en el Client Component
-          createdAt: doc.data().createdAt?.toDate()?.toISOString(),
-        }) as any,
-    ); // Usamos any aquí temporalmente por la serialización de la fecha
+    return snapshot.docs.map((doc) =>
+      serializeFirestoreData({
+        id: doc.id,
+        ...doc.data(),
+      }),
+    );
   },
 
   async updateProduct(id: string, data: Partial<Product>): Promise<void> {
@@ -283,6 +287,7 @@ export const inventoryRepository = {
         ...data,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+    revalidateTag("products", "max");
   },
 
   async toggleProductStatus(id: string, isActive: boolean): Promise<void> {
@@ -290,5 +295,6 @@ export const inventoryRepository = {
       isActive,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+    revalidateTag("products", "max");
   },
 };
