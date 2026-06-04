@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Regla global para desarrollo: 
+    // Cualquier usuario logueado en la app puede leer y escribir.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // NOTA: Cuando pasemos a producción (versión final), 
+    // afinaremos esto para que un chofer SOLO pueda leer SUS propios viajes así:
+    // match /dispatchManifests/{manifestId} {
+    //   allow read: if request.auth != null && request.auth.uid == resource.data.driverId;
+    // }
+  }
+}

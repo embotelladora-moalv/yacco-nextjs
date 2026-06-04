@@ -1,0 +1,27 @@
+// src/services/firebase/admin.ts
+import * as admin from "firebase-admin";
+
+if (!admin.apps.length) {
+  // Verificamos si estamos usando el emulador
+  const isEmulator = process.env.FIRESTORE_EMULATOR_HOST;
+
+  admin.initializeApp({
+    // Si estamos en el emulador, solo pasamos el projectId
+    // Si estamos en producción, pasamos las credenciales completas
+    ...(isEmulator
+      ? { projectId: process.env.FIREBASE_PROJECT_ID || "demo-project" }
+      : {
+          credential: admin.credential.cert({
+            projectId: process.env.FIREBASE_PROJECT_ID,
+            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+            privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+          }),
+        }),
+    // LÍNEA VITAL: Le dice a Firebase dónde guardar los archivos
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+  });
+}
+
+export const adminAuth = admin.auth();
+export const adminDb = admin.firestore();
+export const adminStorage = admin.storage();
