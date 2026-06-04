@@ -55,6 +55,25 @@ export const salesRepository = {
         }
       }
 
+      // Leer productos si es venta en planta para tener los stocks previos para el Kardex
+      const productDocsMap: Record<string, any> = {};
+      if (data.saleType === "PLANT") {
+        const uniqueProductIds = Array.from(
+          new Set([
+            ...data.items.map((i) => i.productId),
+            ...data.returnedEmpties.map((e) => e.productId),
+          ]),
+        );
+        for (const pId of uniqueProductIds) {
+          const pRef = adminDb.collection(PRODUCTS_COLLECTION).doc(pId);
+          const pDoc = await transaction.get(pRef);
+          if (!pDoc.exists) {
+            throw new Error(`Producto ${pId} no encontrado en el catálogo.`);
+          }
+          productDocsMap[pId] = pDoc.data();
+        }
+      }
+
       // 3. Calcular la nueva Cuenta Corriente de Envases del Cliente
       const currentBalances = customer.containerBalances || [];
       const balanceMap = new Map<string, number>();
@@ -174,22 +193,73 @@ export const salesRepository = {
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       } else if (data.saleType === "PLANT") {
-        // VENTA EN PLANTA: Actualizar el almacén central directo (Descontar llenos, aumentar vacíos)
+        // VENTA EN PLANTA: Actualizar el almacén central directo (Descontar llenos, aumentar vacíos) y registrar en Kardex
         data.items.forEach((item) => {
           const productRef = adminDb
             .collection(PRODUCTS_COLLECTION)
             .doc(item.productId);
+          
+          const productData = productDocsMap[item.productId];
+          const previousStock = productData?.stockFilled || 0;
+          const newStock = previousStock - item.quantity;
+
           transaction.update(productRef, {
-            stockFilled: admin.firestore.FieldValue.increment(-item.quantity),
+            stockFilled: newStock,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          // Registrar en Kardex
+          const kardexRef = adminDb.collection("kardexLogs").doc();
+          transaction.set(kardexRef, {
+            productId: item.productId,
+            type: "OUT",
+            phase: "FILLED",
+            quantity: item.quantity,
+            referenceId: newSaleRef.id,
+            referenceType: "SALE",
+            previousStock: previousStock,
+            newStock: newStock,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            // Nuevos campos
+            movementType: "SALE",
+            delta: -item.quantity,
+            resultingBalance: newStock,
+            userId: registeredBy || "SYSTEM",
           });
         });
 
         data.returnedEmpties.forEach((empty) => {
+          if (empty.quantity <= 0) return;
           const productRef = adminDb
             .collection(PRODUCTS_COLLECTION)
             .doc(empty.productId);
+          
+          const productData = productDocsMap[empty.productId];
+          const previousStock = productData?.stockEmpty || 0;
+          const newStock = previousStock + empty.quantity;
+
           transaction.update(productRef, {
-            stockEmpty: admin.firestore.FieldValue.increment(empty.quantity),
+            stockEmpty: newStock,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          // Registrar en Kardex
+          const kardexRef = adminDb.collection("kardexLogs").doc();
+          transaction.set(kardexRef, {
+            productId: empty.productId,
+            type: "IN",
+            phase: "EMPTY",
+            quantity: empty.quantity,
+            referenceId: newSaleRef.id,
+            referenceType: "SALE",
+            previousStock: previousStock,
+            newStock: newStock,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            // Nuevos campos
+            movementType: "SALE",
+            delta: empty.quantity,
+            resultingBalance: newStock,
+            userId: registeredBy || "SYSTEM",
           });
         });
       }

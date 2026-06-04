@@ -10,7 +10,10 @@ import {
   ArrowUpRight,
   Loader2,
   FileBox,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 interface KardexSectionProps {
@@ -22,23 +25,66 @@ export function KardexSection({ products }: KardexSectionProps) {
   const [logs, setLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Estados de paginación
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [cursorsStack, setCursorsStack] = useState<string[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 15;
+
+  const loadKardex = async (productId: string, cursor?: string, isNext?: boolean, isPrev?: boolean) => {
+    setIsLoading(true);
+    const result = await getKardexAction(productId, pageSize, cursor);
+    setIsLoading(false);
+
+    if (result.success) {
+      setLogs(result.items || []);
+      setNextCursor(result.nextCursor || null);
+      setHasMore(result.hasMore || false);
+
+      if (isNext && cursor) {
+        setCursorsStack((prev) => [...prev, cursor]);
+        setCurrentPage((prev) => prev + 1);
+      } else if (isPrev) {
+        setCursorsStack((prev) => prev.slice(0, -1));
+        setCurrentPage((prev) => prev - 1);
+      } else {
+        // Carga inicial
+        setCursorsStack([]);
+        setCurrentPage(1);
+      }
+    } else {
+      toast.error("Error", { description: result.error });
+      setLogs([]);
+      setNextCursor(null);
+      setHasMore(false);
+      setCursorsStack([]);
+      setCurrentPage(1);
+    }
+  };
+
   const handleProductChange = async (productId: string) => {
     setSelectedProductId(productId);
     if (!productId) {
       setLogs([]);
+      setNextCursor(null);
+      setHasMore(false);
+      setCursorsStack([]);
+      setCurrentPage(1);
       return;
     }
+    await loadKardex(productId);
+  };
 
-    setIsLoading(true);
-    const result = await getKardexAction(productId);
-    setIsLoading(false);
+  const handleNextPage = async () => {
+    if (!hasMore || !nextCursor) return;
+    await loadKardex(selectedProductId, nextCursor, true, false);
+  };
 
-    if (result.success) {
-      setLogs(result.data || []); // <-- Añadimos el fallback aquí
-    } else {
-      toast.error("Error", { description: result.error });
-      setLogs([]);
-    }
+  const handlePrevPage = async () => {
+    if (currentPage === 1) return;
+    const prevCursor = cursorsStack[cursorsStack.length - 2] || undefined;
+    await loadKardex(selectedProductId, prevCursor, false, true);
   };
 
   const formatDate = (isoString: string) => {
@@ -113,11 +159,12 @@ export function KardexSection({ products }: KardexSectionProps) {
           </div>
         ) : (
           // TABLA DE KARDEX
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto flex flex-col justify-between min-h-[300px]">
             <table className="w-full text-sm text-left">
               <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs">
                 <tr>
                   <th className="px-6 py-4">Fecha y Hora</th>
+                  <th className="px-6 py-4">Usuario</th>
                   <th className="px-6 py-4">Operación</th>
                   <th className="px-6 py-4">Fase</th>
                   <th className="px-6 py-4">Movimiento</th>
@@ -125,44 +172,81 @@ export function KardexSection({ products }: KardexSectionProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {logs.map((log) => (
-                  <tr
-                    key={log.id}
-                    className="hover:bg-slate-50/50 transition-colors"
-                  >
-                    <td className="px-6 py-4 font-medium text-slate-700 whitespace-nowrap">
-                      {formatDate(log.createdAt)}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-md text-xs">
-                        {log.referenceType}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 font-medium text-slate-500">
-                      {log.phase === "FILLED"
-                        ? "Llenos (Venta)"
-                        : "Vacíos (Envases)"}
-                    </td>
-                    <td className="px-6 py-4 font-black">
-                      {log.type === "IN" ? (
-                        <span className="text-green-600 flex items-center gap-1">
-                          <ArrowUpRight className="h-4 w-4" /> +{log.quantity}
+                {logs.map((log) => {
+                  const displayBalance = log.resultingBalance !== undefined ? log.resultingBalance : log.newStock;
+                  const displayDelta = log.delta !== undefined ? log.delta : (log.type === "IN" ? log.quantity : -log.quantity);
+                  return (
+                    <tr
+                      key={log.id}
+                      className="hover:bg-slate-50/50 transition-colors"
+                    >
+                      <td className="px-6 py-4 font-medium text-slate-700 whitespace-nowrap">
+                        {formatDate(log.createdAt)}
+                      </td>
+                      <td className="px-6 py-4 text-xs font-bold text-slate-500 uppercase whitespace-nowrap">
+                        {log.userId || "Sistema"}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-md text-xs">
+                          {log.referenceType}
                         </span>
-                      ) : (
-                        <span className="text-red-600 flex items-center gap-1">
-                          <ArrowDownRight className="h-4 w-4" /> -{log.quantity}
+                      </td>
+                      <td className="px-6 py-4 font-medium text-slate-500">
+                        {log.phase === "FILLED"
+                          ? "Llenos (Venta)"
+                          : "Vacíos (Envases)"}
+                      </td>
+                      <td className="px-6 py-4 font-black">
+                        {displayDelta >= 0 ? (
+                          <span className="text-green-600 flex items-center gap-1">
+                            <ArrowUpRight className="h-4 w-4" /> +{Math.abs(displayDelta)}
+                          </span>
+                        ) : (
+                          <span className="text-red-600 flex items-center gap-1">
+                            <ArrowDownRight className="h-4 w-4" /> -{Math.abs(displayDelta)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-bold text-slate-900 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+                          {displayBalance} u.
                         </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="font-bold text-slate-900 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
-                        {log.newStock} u.
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+
+            {/* CONTROLES DE PAGINACIÓN */}
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between mt-auto">
+              <div className="text-xs font-bold text-slate-500">
+                Página {currentPage}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePrevPage}
+                  disabled={currentPage === 1}
+                  className="h-8 w-8 p-0 bg-white shadow-sm rounded-lg border-slate-200 hover:bg-slate-100"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="flex items-center px-4 h-8 text-xs font-black text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm">
+                  Página {currentPage}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleNextPage}
+                  disabled={!hasMore}
+                  className="h-8 w-8 p-0 bg-white shadow-sm rounded-lg border-slate-200 hover:bg-slate-100"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </div>

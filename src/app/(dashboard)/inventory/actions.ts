@@ -69,10 +69,23 @@ export async function registerProductionAction(
   }
 }
 
-export async function getKardexAction(productId: string) {
+export async function getKardexAction(
+  productId: string,
+  pageSize: number = 20,
+  cursor?: string,
+) {
   try {
-    const logs = await inventoryRepository.getKardexByProduct(productId);
-    return { success: true, data: logs };
+    const result = await inventoryRepository.listKardexPaginated({
+      productId,
+      pageSize,
+      cursor,
+    });
+    return {
+      success: true,
+      items: result.items,
+      nextCursor: result.nextCursor,
+      hasMore: result.hasMore,
+    };
   } catch (error: any) {
     console.error("Error al obtener Kardex:", error);
     return { success: false, error: "No se pudo cargar el historial." };

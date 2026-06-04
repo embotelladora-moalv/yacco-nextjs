@@ -8,18 +8,34 @@ import { ActiveRoutesCards } from "./ActiveRoutesCards";
 import { LiquidatedRoutesTable } from "./LiquidatedRoutesTable";
 
 interface DispatchDashboardProps {
-  dispatches: any[];
+  activeRoutes: any[];
+  liquidatedRoutes: any[];
   users: any[];
   products: any[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  totalCount: number;
+  currentCursors: string;
+  currentLimit: number;
+  currentDriverId: string;
+  currentStartDate: string;
+  currentEndDate: string;
 }
 
 export function DispatchDashboard({
-  dispatches,
+  activeRoutes,
+  liquidatedRoutes,
   users,
   products,
+  nextCursor,
+  hasMore,
+  totalCount,
+  currentCursors,
+  currentLimit,
+  currentDriverId,
+  currentStartDate,
+  currentEndDate,
 }: DispatchDashboardProps) {
-  const activeRoutes = dispatches.filter((d) => d.status === "ON_ROUTE");
-  const liquidatedRoutes = dispatches.filter((d) => d.status === "LIQUIDATED");
 
   return (
     <div className="space-y-10 pb-12">
@@ -65,6 +81,14 @@ export function DispatchDashboard({
           liquidatedRoutes={liquidatedRoutes}
           users={users}
           products={products}
+          nextCursor={nextCursor}
+          hasMore={hasMore}
+          totalCount={totalCount}
+          currentCursors={currentCursors}
+          currentLimit={currentLimit}
+          currentDriverId={currentDriverId}
+          currentStartDate={currentStartDate}
+          currentEndDate={currentEndDate}
         />
       </div>
     </div>

@@ -8,6 +8,8 @@ import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { LiquidationForm } from "./LiquidationForm";
 
+import { serializeFirestoreData } from "@/services/firebase/serialization";
+
 export default async function LiquidatePage({
   params,
 }: {
@@ -30,16 +32,12 @@ export default async function LiquidatePage({
     .where("manifestId", "==", resolvedParams.id)
     .get();
 
-  // SOLUCIÓN AL ERROR: Convertimos los Timestamps de Firestore a Strings (Textos)
+  // SOLUCIÓN DEFINITIVA: Usamos el serializador recursivo para limpiar todos los Timestamps (date, dateProcess, etc)
   const sales = salesSnapshot.docs.map((doc) => {
-    const data = doc.data();
-    return {
+    return serializeFirestoreData({
       id: doc.id,
-      ...data,
-      // Convertimos createdAt y updatedAt a formato de fecha texto
-      createdAt: data.createdAt?.toDate()?.toISOString() || null,
-      updatedAt: data.updatedAt?.toDate()?.toISOString() || null,
-    };
+      ...doc.data(),
+    });
   });
 
   // 4. Obtener Gastos (Opcional, para el cuadre de caja futuro)

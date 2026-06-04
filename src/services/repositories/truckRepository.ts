@@ -2,6 +2,7 @@ import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { TruckFormValues } from "@/core/validations/truckSchema";
 import { Truck } from "@/core/entities/Truck";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 const COLLECTION = "trucks";
 
@@ -13,14 +14,10 @@ export const truckRepository = {
       .get();
 
     return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+      return serializeFirestoreData({
         id: doc.id,
-        ...data,
-        // Convertimos los Timestamps de Firebase a Date nativo de JS
-        createdAt: data.createdAt?.toDate() || new Date(),
-        updatedAt: data.updatedAt?.toDate() || new Date(),
-      } as Truck;
+        ...doc.data(),
+      });
     });
   },
 
@@ -29,13 +26,10 @@ export const truckRepository = {
     if (!doc.exists) return null;
 
     const data = doc.data()!;
-    return {
+    return serializeFirestoreData({
       id: doc.id,
       ...data,
-      // Convertimos los Timestamps de Firebase a Date nativo de JS
-      createdAt: data.createdAt?.toDate() || new Date(),
-      updatedAt: data.updatedAt?.toDate() || new Date(),
-    } as Truck;
+    });
   },
 
   async create(data: TruckFormValues) {

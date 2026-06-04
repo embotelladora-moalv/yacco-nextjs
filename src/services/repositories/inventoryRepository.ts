@@ -8,6 +8,7 @@ import {
 } from "@/core/entities/Inventory";
 import { serializeFirestoreData } from "@/services/firebase/serialization";
 import { unstable_cache, revalidateTag } from "next/cache";
+import { paginate } from "./_pagination";
 
 const PRODUCTS_COLLECTION = "products";
 const KARDEX_COLLECTION = "kardexLogs";
@@ -81,6 +82,11 @@ export const inventoryRepository = {
         previousStock: currentStockEmpty,
         newStock: currentStockEmpty + quantity,
         createdAt: new Date(),
+        // Nuevos campos
+        movementType: "PURCHASE",
+        delta: quantity,
+        resultingBalance: currentStockEmpty + quantity,
+        userId: managerId || "SYSTEM",
       };
       transaction.set(kardexRef, kardexEntry);
     });
@@ -186,6 +192,10 @@ export const inventoryRepository = {
           previousStock: currentEmpty,
           newStock: newEmpty,
           createdAt: new Date(),
+          movementType: "PRODUCTION",
+          delta: -batch.quantityProduced,
+          resultingBalance: newEmpty,
+          userId: batch.managerId || "SYSTEM",
         });
       }
 
@@ -201,6 +211,10 @@ export const inventoryRepository = {
         previousStock: currentFilled,
         newStock: newFilled,
         createdAt: new Date(),
+        movementType: "PRODUCTION",
+        delta: batch.quantityProduced,
+        resultingBalance: newFilled,
+        userId: batch.managerId || "SYSTEM",
       });
     });
     revalidateTag("products", "max");
@@ -255,6 +269,10 @@ export const inventoryRepository = {
         previousStock: currentStock,
         newStock: newStock,
         createdAt: new Date(),
+        movementType: "LOSS",
+        delta: -shrinkage.quantity,
+        resultingBalance: newStock,
+        userId: shrinkage.managerId || "SYSTEM",
       });
     });
     revalidateTag("products", "max");
@@ -296,5 +314,50 @@ export const inventoryRepository = {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     revalidateTag("products", "max");
+  },
+
+  async listKardexPaginated(options: {
+    productId: string;
+    pageSize: number;
+    cursor?: string;
+  }) {
+    if (!options.productId) {
+      throw new Error("El ID del producto es obligatorio para consultar el Kardex.");
+    }
+
+    const query = adminDb
+      .collection(KARDEX_COLLECTION)
+      .where("productId", "==", options.productId)
+      .orderBy("createdAt", "desc")
+      .orderBy("__name__", "desc");
+
+    const projectedQuery = query.select(
+      "productId",
+      "type",
+      "phase",
+      "quantity",
+      "previousStock",
+      "newStock",
+      "createdAt",
+      "referenceId",
+      "referenceType",
+      "movementType",
+      "delta",
+      "resultingBalance",
+      "userId"
+    );
+
+    return await paginate<any>(
+      projectedQuery,
+      options,
+      ["createdAt", "id"],
+      (doc) => {
+        const data = doc.data();
+        return serializeFirestoreData({
+          id: doc.id,
+          ...data,
+        });
+      }
+    );
   },
 };

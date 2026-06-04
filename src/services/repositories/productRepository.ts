@@ -3,6 +3,7 @@ import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { Product } from "@/core/entities/Product";
 import { ProductFormValues } from "@/core/validations/productSchema";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 const COLLECTION_NAME = "products";
 
@@ -29,15 +30,12 @@ export const productRepository = {
       .where("isActive", "==", true)
       .get();
 
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+    return snapshot.docs.map((doc) =>
+      serializeFirestoreData({
         id: doc.id,
-        ...data,
-        createdAt: data.createdAt?.toDate(),
-        updatedAt: data.updatedAt?.toDate(),
-      } as Product;
-    });
+        ...doc.data(),
+      }),
+    );
   },
 
   // 3. Eliminación Lógica (Soft Delete)
@@ -53,18 +51,15 @@ export const productRepository = {
     const snapshot = await adminDb
       .collection(COLLECTION_NAME)
       .where("isActive", "==", true)
-      //.orderBy("name", "asc") // Descomenta esto si ya tienes un índice en Firebase
+      .orderBy("name", "asc")
       .get();
 
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+    return snapshot.docs.map((doc) =>
+      serializeFirestoreData({
         id: doc.id,
-        ...data,
-        createdAt: data.createdAt?.toDate(),
-        updatedAt: data.updatedAt?.toDate(),
-      } as Product;
-    });
+        ...doc.data(),
+      }),
+    );
   },
 
   /**
@@ -75,12 +70,10 @@ export const productRepository = {
     if (!doc.exists) return null;
 
     const data = doc.data()!;
-    return {
+    return serializeFirestoreData({
       id: doc.id,
       ...data,
-      createdAt: data.createdAt?.toDate(),
-      updatedAt: data.updatedAt?.toDate(),
-    } as Product;
+    });
   },
 
   /**

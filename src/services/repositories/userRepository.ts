@@ -2,6 +2,7 @@ import { adminDb, adminAuth } from "../firebase/admin"; // <-- Agregamos adminAu
 import admin from "firebase-admin";
 import { User } from "@/core/entities/User";
 import { UserFormValues } from "@/core/validations/userSchema";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 const COLLECTION = "users";
 
@@ -11,14 +12,11 @@ export const userRepository = {
       .collection(COLLECTION)
       .orderBy("name", "asc")
       .get();
-    return snapshot.docs.map(
-      (doc) =>
-        ({
-          id: doc.id,
-          ...doc.data(),
-          createdAt: doc.data().createdAt?.toDate(),
-          updatedAt: doc.data().updatedAt?.toDate(),
-        }) as User,
+    return snapshot.docs.map((doc) =>
+      serializeFirestoreData({
+        id: doc.id,
+        ...doc.data(),
+      }),
     );
   },
 
@@ -27,12 +25,10 @@ export const userRepository = {
     if (!doc.exists) return null;
 
     const data = doc.data()!;
-    return {
+    return serializeFirestoreData({
       id: doc.id,
       ...data,
-      createdAt: data.createdAt?.toDate()?.toISOString() || null,
-      updatedAt: data.updatedAt?.toDate()?.toISOString() || null,
-    };
+    });
   },
 
   /**

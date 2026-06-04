@@ -2,6 +2,7 @@ import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
 import { CashMovement, FinanceCategory } from "@/core/entities/Finance";
 import { CashMovementFormValues } from "@/core/validations/financeSchemas";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 const MOVEMENTS_COLLECTION = "cashMovements";
 const CATEGORIES_COLLECTION = "finance_categories";
@@ -17,11 +18,12 @@ export const financeRepository = {
       .where("isActive", "==", true)
       .get();
 
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || null,
-    })) as any;
+    return snapshot.docs.map((doc) =>
+      serializeFirestoreData({
+        id: doc.id,
+        ...doc.data(),
+      }),
+    );
   },
 
   // ==========================================
@@ -53,16 +55,12 @@ export const financeRepository = {
       .limit(limitCount)
       .get();
 
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+    return snapshot.docs.map((doc) =>
+      serializeFirestoreData({
         id: doc.id,
-        ...data,
-        date: data.date?.toDate?.()?.toISOString() || null,
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-      } as any;
-    });
+        ...doc.data(),
+      }),
+    );
   },
 
   /**
@@ -75,15 +73,11 @@ export const financeRepository = {
       .where("manifestId", "==", manifestId)
       .get();
 
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
+    return snapshot.docs.map((doc) =>
+      serializeFirestoreData({
         id: doc.id,
-        ...data,
-        date: data.date?.toDate?.()?.toISOString() || null,
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-      } as any;
-    });
+        ...doc.data(),
+      }),
+    );
   },
 };

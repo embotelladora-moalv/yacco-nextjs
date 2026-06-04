@@ -75,6 +75,14 @@
       ]
     },
     {
+      "collectionGroup": "dispatchManifests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "driverId", "order": "ASCENDING" },
+        { "fieldPath": "dispatchDate", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "kardexLogs",
       "queryScope": "COLLECTION",
       "fields": [

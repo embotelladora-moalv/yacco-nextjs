@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Product } from "@/core/entities/Inventory";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +32,12 @@ interface InventoryDashboardProps {
 }
 
 export function InventoryDashboard({ products }: InventoryDashboardProps) {
+  const [showOnlyActive, setShowOnlyActive] = useState(true);
+
+  const filteredProducts = showOnlyActive
+    ? products.filter((product) => product.isActive)
+    : products;
+
   return (
     <div className="space-y-8">
       {/* HEADER Y BOTONES DE ACCIÓN */}
@@ -66,12 +73,37 @@ export function InventoryDashboard({ products }: InventoryDashboardProps) {
 
       {/* SECCIÓN: TARJETAS DE STOCK DISPONIBLE */}
       <div className="space-y-4">
-        <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-          <Package className="h-5 w-5 text-slate-400" /> Stock Actual en Planta
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+            <Package className="h-5 w-5 text-slate-400" /> Stock Actual en Planta
+          </h2>
+
+          <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 border border-slate-200 self-start sm:self-auto">
+            <button
+              onClick={() => setShowOnlyActive(true)}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                showOnlyActive
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              Solo Activos
+            </button>
+            <button
+              onClick={() => setShowOnlyActive(false)}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                !showOnlyActive
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              Mostrar Todos
+            </button>
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {products.map((product) => (
+          {filteredProducts.map((product) => (
             <div
               key={product.id}
               className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group hover:border-blue-300 transition-colors"
@@ -202,11 +234,13 @@ export function InventoryDashboard({ products }: InventoryDashboardProps) {
             </div>
           ))}
 
-          {products.length === 0 && (
+          {filteredProducts.length === 0 && (
             <div className="col-span-full py-12 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50">
               <Package className="h-10 w-10 text-slate-300 mx-auto mb-2" />
               <p className="text-slate-500 font-bold">
-                No hay productos en el catálogo.
+                {showOnlyActive
+                  ? "No hay productos activos en el catálogo."
+                  : "No hay productos en el catálogo."}
               </p>
             </div>
           )}

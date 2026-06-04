@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useTransition } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import {
   Search,
   Filter,
@@ -17,6 +18,7 @@ import {
   Package,
   ArrowDownToLine,
   Users,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -25,26 +27,54 @@ interface LiquidatedRoutesTableProps {
   liquidatedRoutes: any[];
   users: any[];
   products: any[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  totalCount: number;
+  currentCursors: string;
+  currentLimit: number;
+  currentDriverId: string;
+  currentStartDate: string;
+  currentEndDate: string;
 }
 
 export function LiquidatedRoutesTable({
   liquidatedRoutes,
   users,
   products,
+  nextCursor,
+  hasMore,
+  totalCount,
+  currentCursors,
+  currentLimit,
+  currentDriverId,
+  currentStartDate,
+  currentEndDate,
 }: LiquidatedRoutesTableProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
+
   // --- FILTROS Y ESTADOS ---
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
   // Filtros Avanzados
-  const [selectedDriverId, setSelectedDriverId] = useState("ALL");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [selectedDriverId, setSelectedDriverId] = useState(currentDriverId);
+  const [startDate, setStartDate] = useState(currentStartDate);
+  const [endDate, setEndDate] = useState(currentEndDate);
 
-  // Paginación
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  useEffect(() => {
+    setSelectedDriverId(currentDriverId);
+  }, [currentDriverId]);
+
+  useEffect(() => {
+    setStartDate(currentStartDate);
+  }, [currentStartDate]);
+
+  useEffect(() => {
+    setEndDate(currentEndDate);
+  }, [currentEndDate]);
 
   // Cerrar filtros al hacer click afuera
   useEffect(() => {
@@ -82,38 +112,92 @@ export function LiquidatedRoutesTable({
     });
   };
 
-  // --- FILTRADO AVANZADO MATEMÁTICO ---
+  // --- LÓGICA DE NAVEGACIÓN Y FILTRADO ---
+  const cursorArray = currentCursors ? currentCursors.split(",") : [];
+  const currentPage = cursorArray.length + 1;
+  const totalPages = Math.ceil(totalCount / currentLimit);
+
+  const navigate = (params: {
+    driverId?: string;
+    startDate?: string;
+    endDate?: string;
+    cursors?: string;
+    limit?: number;
+  }) => {
+    const query = new URLSearchParams();
+
+    const newDriverId = params.driverId !== undefined ? params.driverId : currentDriverId;
+    if (newDriverId && newDriverId !== "ALL") {
+      query.set("driverId", newDriverId);
+    }
+
+    const newStartDate = params.startDate !== undefined ? params.startDate : currentStartDate;
+    if (newStartDate) {
+      query.set("startDate", newStartDate);
+    }
+
+    const newEndDate = params.endDate !== undefined ? params.endDate : currentEndDate;
+    if (newEndDate) {
+      query.set("endDate", newEndDate);
+    }
+
+    const newCursors = params.cursors !== undefined ? params.cursors : currentCursors;
+    if (newCursors) {
+      query.set("cursors", newCursors);
+    }
+
+    const newLimit = params.limit !== undefined ? params.limit : currentLimit;
+    query.set("limit", String(newLimit));
+
+    startTransition(() => {
+      router.push(`${pathname}?${query.toString()}`);
+    });
+  };
+
+  const handleNextPage = () => {
+    if (!hasMore || !nextCursor) return;
+    const nextCursors = currentCursors ? `${currentCursors},${nextCursor}` : nextCursor;
+    navigate({ cursors: nextCursors });
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage === 1) return;
+    const prevCursors = cursorArray.slice(0, -1).join(",");
+    navigate({ cursors: prevCursors });
+  };
+
+  const applyAdvancedFilters = (filters: { driverId: string; startDate: string; endDate: string }) => {
+    navigate({
+      driverId: filters.driverId,
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      cursors: "",
+    });
+  };
+
+  const handleClearFilters = () => {
+    setSelectedDriverId("ALL");
+    setStartDate("");
+    setEndDate("");
+    setShowFilters(false);
+    navigate({
+      driverId: "ALL",
+      startDate: "",
+      endDate: "",
+      cursors: "",
+    });
+  };
+
   const filteredRoutes = useMemo(() => {
     return liquidatedRoutes.filter((r) => {
       const matchesSearch =
         r.manifestNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         r.truckPlate?.toLowerCase().includes(searchQuery.toLowerCase());
-
-      const matchesDriver =
-        selectedDriverId === "ALL" || r.driverId === selectedDriverId;
-
-      let matchesDates = true;
-      if (startDate) {
-        const start = new Date(`${startDate}T00:00:00`);
-        const dispatchTime = new Date(r.dispatchDate);
-        if (dispatchTime < start) matchesDates = false;
-      }
-      if (endDate) {
-        const end = new Date(`${endDate}T23:59:59`);
-        const dispatchTime = new Date(r.dispatchDate);
-        if (dispatchTime > end) matchesDates = false;
-      }
-
-      return matchesSearch && matchesDriver && matchesDates;
+      return matchesSearch;
     });
-  }, [liquidatedRoutes, searchQuery, selectedDriverId, startDate, endDate]);
+  }, [liquidatedRoutes, searchQuery]);
 
-  // Paginación estructural
-  const totalPages = Math.ceil(filteredRoutes.length / itemsPerPage);
-  const paginatedData = filteredRoutes.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage,
-  );
+  const paginatedData = filteredRoutes;
 
   const activeFiltersCount =
     (selectedDriverId !== "ALL" ? 1 : 0) +
@@ -122,6 +206,11 @@ export function LiquidatedRoutesTable({
 
   return (
     <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm flex flex-col relative min-h-[500px]">
+      {isPending && (
+        <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-10 flex items-center justify-center rounded-[2rem]">
+          <Loader2 className="h-8 w-8 text-orange-500 animate-spin" />
+        </div>
+      )}
       {/* TOOLBAR AL ESTILO CRM CLIENTES */}
       <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between gap-4 items-center">
         <div className="relative w-full sm:max-w-md">
@@ -132,7 +221,6 @@ export function LiquidatedRoutesTable({
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
-              setCurrentPage(1);
             }}
             className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-medium text-slate-800"
           />
@@ -163,7 +251,7 @@ export function LiquidatedRoutesTable({
                   value={selectedDriverId}
                   onChange={(e) => {
                     setSelectedDriverId(e.target.value);
-                    setCurrentPage(1);
+                    applyAdvancedFilters({ driverId: e.target.value, startDate, endDate });
                   }}
                   className="w-full h-10 px-2 rounded-xl border border-slate-200 bg-slate-50 font-bold text-xs text-slate-700 focus:outline-none"
                 >
@@ -193,9 +281,8 @@ export function LiquidatedRoutesTable({
                       value={startDate}
                       onChange={(e) => {
                         setStartDate(e.target.value);
-                        setCurrentPage(1);
+                        applyAdvancedFilters({ driverId: selectedDriverId, startDate: e.target.value, endDate });
                       }}
-                      className="w-full h-9 px-2 rounded-lg border text-xs bg-slate-50 font-bold text-slate-700 focus:outline-none"
                     />
                   </div>
                   <div className="space-y-1">
@@ -207,9 +294,8 @@ export function LiquidatedRoutesTable({
                       value={endDate}
                       onChange={(e) => {
                         setEndDate(e.target.value);
-                        setCurrentPage(1);
+                        applyAdvancedFilters({ driverId: selectedDriverId, startDate, endDate: e.target.value });
                       }}
-                      className="w-full h-9 px-2 rounded-lg border text-xs bg-slate-50 font-bold text-slate-700 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -263,7 +349,7 @@ export function LiquidatedRoutesTable({
             <tbody className="divide-y divide-slate-100">
               {paginatedData.map((dispatch, index) => {
                 const globalIndex =
-                  (currentPage - 1) * itemsPerPage + index + 1;
+                  (currentPage - 1) * currentLimit + index + 1;
 
                 // Cálculo rápido de mermas o devoluciones físicas para el Tooltip nativo
                 const totalReturnedFulls =
@@ -415,10 +501,9 @@ export function LiquidatedRoutesTable({
         <div className="flex items-center gap-2 text-sm text-slate-500 font-medium">
           <span>Mostrar</span>
           <select
-            value={itemsPerPage}
+            value={currentLimit}
             onChange={(e) => {
-              setItemsPerPage(Number(e.target.value));
-              setCurrentPage(1);
+              navigate({ limit: Number(e.target.value), cursors: "" });
             }}
             className="border border-slate-200 bg-white rounded-md px-2 py-1 font-bold text-slate-700 focus:outline-none shadow-sm text-xs"
           >
@@ -433,7 +518,7 @@ export function LiquidatedRoutesTable({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setCurrentPage((prev) => prev - 1)}
+            onClick={handlePrevPage}
             disabled={currentPage === 1}
             className="h-8 w-8 p-0 bg-white shadow-sm rounded-lg"
           >
@@ -445,8 +530,8 @@ export function LiquidatedRoutesTable({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setCurrentPage((prev) => prev + 1)}
-            disabled={currentPage === totalPages || totalPages === 0}
+            onClick={handleNextPage}
+            disabled={!hasMore}
             className="h-8 w-8 p-0 bg-white shadow-sm rounded-lg"
           >
             <ChevronRight className="h-4 w-4" />
