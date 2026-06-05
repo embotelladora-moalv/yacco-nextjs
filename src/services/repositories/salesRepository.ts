@@ -966,4 +966,36 @@ export const salesRepository = {
       .get();
     return countSnapshot.data().count;
   },
+
+  async getSalesByManifestIds(manifestIds: string[]): Promise<Sale[]> {
+    if (manifestIds.length === 0) return [];
+
+    // Firestore limit for "in" queries is 30 elements.
+    // We chunk the manifestIds into groups of 30 to prevent exceptions.
+    const CHUNK_SIZE = 30;
+    const chunks: string[][] = [];
+    for (let i = 0; i < manifestIds.length; i += CHUNK_SIZE) {
+      chunks.push(manifestIds.slice(i, i + CHUNK_SIZE));
+    }
+
+    const allSales: Sale[] = [];
+
+    for (const chunk of chunks) {
+      const snapshot = await adminDb
+        .collection(SALES_COLLECTION)
+        .where("manifestId", "in", chunk)
+        .get();
+
+      snapshot.docs.forEach((doc) => {
+        allSales.push(
+          serializeFirestoreData({
+            id: doc.id,
+            ...doc.data(),
+          }) as Sale
+        );
+      });
+    }
+
+    return allSales;
+  },
 };
