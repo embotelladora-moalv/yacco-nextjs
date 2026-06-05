@@ -34,6 +34,7 @@ interface SaleFormProps {
   customers: Customer[];
   products: Product[];
   initialOrder?: any;
+  activeBatches?: any[];
 }
 
 export function SaleForm({
@@ -41,6 +42,7 @@ export function SaleForm({
   customers,
   products,
   initialOrder,
+  activeBatches = [],
 }: SaleFormProps) {
   const [isPending, setIsPending] = useState(false);
   const router = useRouter();
@@ -227,6 +229,20 @@ export function SaleForm({
       ),
       linkedOrderId: initialOrder?.id || undefined,
     };
+
+    // 🔥 VALIDACIÓN DE MAQUILA EN PLANTA: Si es un producto maquila, es obligatorio seleccionar lote manualmente
+    if (cleanedValues.saleType === "PLANT") {
+      for (const item of cleanedValues.items) {
+        const product = products.find((p) => p.id === item.productId);
+        if (product?.isMaquila && item.itemSaleType !== "BOTTLE" && !item.lotNumber) {
+          toast.error("Seleccione un lote", {
+            description: `Debe elegir un lote manualmente para el producto de maquila: ${product.name}`,
+          });
+          setIsPending(false);
+          return;
+        }
+      }
+    }
 
     // 🔥 NUEVA LÓGICA: Permitir guardar si al menos compró algo O si al menos devolvió un envase
     if (
@@ -541,6 +557,13 @@ export function SaleForm({
                 }
               }
 
+              const selectedProductId = watchItems[index]?.productId;
+              const selectedProduct = products.find((p) => p.id === selectedProductId);
+              const showLotSelector =
+                watchSaleType === "PLANT" &&
+                selectedProduct?.isMaquila &&
+                watchItems[index]?.itemSaleType !== "BOTTLE";
+
               const isOverStock =
                 maxStock !== undefined &&
                 Number(watchItems[index]?.quantity) > maxStock;
@@ -550,7 +573,7 @@ export function SaleForm({
                   key={field.id}
                   className={`flex flex-col md:flex-row gap-3 items-center p-4 rounded-xl border transition-colors ${isOverStock ? "bg-red-50/50 border-red-200" : "bg-slate-50 md:bg-transparent md:border-none"}`}
                 >
-                  <div className="w-full md:flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className={`w-full md:flex-1 grid grid-cols-1 ${showLotSelector ? "sm:grid-cols-3" : "sm:grid-cols-2"} gap-3`}>
                     <select
                       {...form.register(`items.${index}.productId`)}
                       onChange={(e) => {
@@ -560,6 +583,7 @@ export function SaleForm({
                           e.target.value,
                           form.getValues(`items.${index}.itemSaleType`),
                         );
+                        form.setValue(`items.${index}.lotNumber`, ""); // Reset lot when product changes
                       }}
                       className="w-full h-11 px-3 rounded-lg border text-sm font-bold bg-white"
                     >
@@ -588,6 +612,21 @@ export function SaleForm({
                       <option value="FULL">Venta Nueva (Lleno)</option>
                       <option value="BOTTLE">Solo Envase (Vacío)</option>
                     </select>
+                    {showLotSelector && (
+                      <select
+                        {...form.register(`items.${index}.lotNumber`)}
+                        className="w-full h-11 px-3 rounded-lg border text-sm font-bold bg-purple-50 text-purple-800 border-purple-200"
+                      >
+                        <option value="">Seleccionar Lote *</option>
+                        {(activeBatches || [])
+                          .filter((b) => b.productId === selectedProductId)
+                          .map((b) => (
+                            <option key={b.id} value={b.lotNumber}>
+                              {b.lotNumber} (Stock: {b.currentStock})
+                            </option>
+                          ))}
+                      </select>
+                    )}
                   </div>
                   <div className="flex w-full md:w-auto gap-3 items-center justify-between">
                     <div className="w-20 relative">

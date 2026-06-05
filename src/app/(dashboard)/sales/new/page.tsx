@@ -23,12 +23,13 @@ export default async function NewSalePage({ searchParams }: PageProps) {
   const { orderId } = resolvedSearchParams;
 
   // 1. Consultas concurrentes base
-  const [customers, products, activeManifests, initialOrder] =
+  const [customers, products, activeManifests, initialOrder, activeBatches] =
     await Promise.all([
       customerRepository.getAllCustomers(),
       inventoryRepository.getAllProducts(),
       dispatchRepository.getActiveManifests(),
       orderId ? orderRepository.getOrderById(orderId) : Promise.resolve(null),
+      inventoryRepository.getActiveBatches(),
     ]);
 
   // 2. 🔥 NUEVO: Traemos todas las ventas asociadas a los camiones activos para calcular el stock real remanente
@@ -75,6 +76,7 @@ export default async function NewSalePage({ searchParams }: PageProps) {
         products={products}
         activeManifests={manifestsWithSales} // <-- Enviamos los camiones con sus ventas inyectadas
         initialOrder={initialOrder}
+        activeBatches={activeBatches}
       />
     </div>
   );
