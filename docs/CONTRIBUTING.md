@@ -112,6 +112,7 @@ export async function doSomethingAction(data: SomethingInput) {
   consistencia, **no** `new Date()`.
 - Los nombres de colección como **constantes** al inicio del repositorio:
   `const ORDERS = "orders"`.
+- **Nombres de colecciones:** Todas las colecciones y subcolecciones de Firestore deben usar **camelCase** estrictamente (ej: `financeCategories`, `shrinkageReasons`, `kardexLogs`). Queda prohibido usar `snake_case` o `kebab-case` para nuevos desarrollos.
 
 ---
 

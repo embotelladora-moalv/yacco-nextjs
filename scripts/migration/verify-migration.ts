@@ -117,8 +117,8 @@ async function checkCounts(): Promise<CountRow[]> {
   log("§1 Conteos old vs new...");
   const pairs: Array<[string, string, string]> = [
     // [label, oldCollection, newCollection]
-    ["paymentReasons",  "paymentReasons",  "finance_categories"],
-    ["uselessReasons",  "uselessReasons",  "shrinkage_reasons"],
+    ["paymentReasons",  "paymentReasons",  "financeCategories"],
+    ["uselessReasons",  "uselessReasons",  "shrinkageReasons"],
     ["users",           "users",           "users"],
     ["vehicles",        "vehicles",        "trucks"],
     ["products",        "products",        "products"],
@@ -155,7 +155,7 @@ async function checkReferentialIntegrity(): Promise<OrphanResult[]> {
     loadIdSet(newDb, "customers"),
     loadIdSet(newDb, "products"),
     loadIdSet(newDb, "dispatchManifests"),
-    loadIdSet(newDb, "finance_categories"),
+    loadIdSet(newDb, "financeCategories"),
   ]);
   log(`  customers=${customerIds.size} products=${productIds.size} manifests=${manifestIds.size} categories=${categoryIds.size}`);
 
@@ -177,7 +177,7 @@ async function checkReferentialIntegrity(): Promise<OrphanResult[]> {
     log(`  ${orphans.length === 0 ? "✓" : "⚠️"}  sales.customerId huérfanos: ${orphans.length}`);
   }
 
-  // cashMovements.categoryId → finance_categories
+  // cashMovements.categoryId → financeCategories
   {
     log("  Verificando cashMovements.categoryId...");
     const orphans: string[] = [];
@@ -188,7 +188,7 @@ async function checkReferentialIntegrity(): Promise<OrphanResult[]> {
     results.push({
       entity: "cashMovements",
       field: "categoryId",
-      referencedCollection: "finance_categories",
+      referencedCollection: "financeCategories",
       total: orphans.length,
       examples: orphans.slice(0, 20),
     });

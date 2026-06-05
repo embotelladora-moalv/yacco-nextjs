@@ -91,7 +91,7 @@
       ]
     },
     {
-      "collectionGroup": "settings_categories",
+      "collectionGroup": "settingsCategories",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "isActive", "order": "ASCENDING" },

@@ -1,4 +1,4 @@
-// transforms/paymentReasons.ts  →  finance_categories
+// transforms/paymentReasons.ts  →  financeCategories
 import { oldDb } from "../connections";
 import { batchWrite, log, MigrationResult, tsToDate } from "../migrationHelpers";
 import * as admin from "firebase-admin";
@@ -15,7 +15,7 @@ export async function migratePaymentReasons(
   dryRun: boolean
 ): Promise<MigrationResult> {
   const result: MigrationResult = {
-    collection: "paymentReasons → finance_categories",
+    collection: "paymentReasons → financeCategories",
     read: 0,
     written: 0,
     skipped: 0,
@@ -43,6 +43,6 @@ export async function migratePaymentReasons(
     });
   });
 
-  await batchWrite("finance_categories", docs, dryRun, result);
+  await batchWrite("financeCategories", docs, dryRun, result);
   return result;
 }

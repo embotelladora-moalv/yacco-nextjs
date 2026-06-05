@@ -16,7 +16,7 @@ const collectionsToClear = [
   "customers",
   "orders",
   "sales",
-  "finance_categories",
+  "financeCategories",
   "cashMovements",
   "trucks", // NUEVO: Colección de camiones
 ];
@@ -198,7 +198,7 @@ export async function resetAndSeedDatabaseAction() {
     ];
 
     for (const cat of finCategories) {
-      await adminDb.collection("finance_categories").add({
+      await adminDb.collection("financeCategories").add({
         ...cat,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });

@@ -1,4 +1,4 @@
-// transforms/uselessReasons.ts  →  shrinkage_reasons
+// transforms/uselessReasons.ts  →  shrinkageReasons
 import { oldDb } from "../connections";
 import { batchWrite, log, MigrationResult, tsToDate } from "../migrationHelpers";
 import * as admin from "firebase-admin";
@@ -15,7 +15,7 @@ export async function migrateUselessReasons(
   dryRun: boolean
 ): Promise<MigrationResult> {
   const result: MigrationResult = {
-    collection: "uselessReasons → shrinkage_reasons",
+    collection: "uselessReasons → shrinkageReasons",
     read: 0,
     written: 0,
     skipped: 0,
@@ -45,6 +45,6 @@ export async function migrateUselessReasons(
     });
   });
 
-  await batchWrite("shrinkage_reasons", docs, dryRun, result);
+  await batchWrite("shrinkageReasons", docs, dryRun, result);
   return result;
 }

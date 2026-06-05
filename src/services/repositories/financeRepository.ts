@@ -5,7 +5,7 @@ import { CashMovementFormValues } from "@/core/validations/financeSchemas";
 import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 const MOVEMENTS_COLLECTION = "cashMovements";
-const CATEGORIES_COLLECTION = "finance_categories";
+const CATEGORIES_COLLECTION = "financeCategories";
 
 export const financeRepository = {
   // ==========================================

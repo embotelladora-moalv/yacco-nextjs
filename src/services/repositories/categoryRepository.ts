@@ -22,7 +22,7 @@ export const categoryRepository = {
   async getActiveCategories(): Promise<CustomerCategory[]> {
     try {
       const snapshot = await adminDb
-        .collection("settings_categories")
+        .collection("settingsCategories")
         .where("isActive", "==", true)
         .orderBy("name", "asc")
         .get();
@@ -48,7 +48,7 @@ export const categoryRepository = {
     colorLabel?: string;
   }) {
     try {
-      const newDoc = await adminDb.collection("settings_categories").add({
+      const newDoc = await adminDb.collection("settingsCategories").add({
         ...data,
         isActive: true,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),

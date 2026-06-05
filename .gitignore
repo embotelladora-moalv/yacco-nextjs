@@ -54,3 +54,4 @@ keys/
 /scripts/geo/*.json
 /scripts/backfill/*.json
 liquidation-time-report.json
+/scripts/audit/*.json
