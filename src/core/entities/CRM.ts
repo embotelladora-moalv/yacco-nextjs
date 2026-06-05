@@ -82,6 +82,8 @@ export interface Sale {
   remainingBalance: number;
   isBilled?: boolean;
   sunatDocumentId?: string | null;
+  date?: string;
+  dateProcess?: string;
   createdAt: Date;
   updatedAt: Date;
 }

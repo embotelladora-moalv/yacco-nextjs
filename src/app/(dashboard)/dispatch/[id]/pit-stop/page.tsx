@@ -1,5 +1,6 @@
 import { dispatchRepository } from "@/services/repositories/dispatchRepository";
 import { inventoryRepository } from "@/services/repositories/inventoryRepository";
+import { salesRepository } from "@/services/repositories/salesRepository";
 import { adminDb } from "@/services/firebase/admin";
 import { notFound } from "next/navigation";
 import { PitStopClient } from "./PitStopClient";
@@ -29,22 +30,7 @@ export default async function PitStopPage({
   }));
 
   // 3. Buscamos las ventas de este camión
-  const salesSnap = await adminDb
-    .collection("sales")
-    .where("manifestId", "==", manifestId)
-    .get();
-
-  // 🔥 SOLUCIÓN: Serialización segura de las fechas de Firebase a formato ISO (String)
-  const sales = salesSnap.docs.map((doc) => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      ...data,
-      createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-      updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-      deliveredAt: data.deliveredAt?.toDate?.()?.toISOString() || null,
-    };
-  });
+  const sales = await salesRepository.getSalesByManifestIds([manifestId]);
 
   return (
     <div className="max-w-5xl mx-auto pb-10 pt-4 px-4 sm:px-6">

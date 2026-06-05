@@ -7,6 +7,7 @@ import { PaymentHistoryList } from "./PaymentHistoryList"; // Asegúrate de tene
 import { Button } from "@/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
+import { serializeFirestoreData } from "@/services/firebase/serialization";
 
 export default async function CustomerPaymentPage({
   params,
@@ -36,14 +37,11 @@ export default async function CustomerPaymentPage({
 
   // 2. Serializamos usuarios
   const users = usersSnapshot.docs.map((doc) => {
-    const data = doc.data();
-    return {
+    return serializeFirestoreData({
       id: doc.id,
-      ...data,
-      createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-      updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-    };
-  }) as any[];
+      ...doc.data(),
+    });
+  });
 
   return (
     // CAMBIO CLAVE: max-w-7xl para más anchura, mx-auto para centrar.
