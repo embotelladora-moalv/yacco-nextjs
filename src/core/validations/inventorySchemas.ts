@@ -13,7 +13,7 @@ export const productSchema = z.object({
   // Especificaciones físicas
   volume: z.coerce.number().min(0),
   unit: z.enum(["L", "ml", "Gal", "Oz"]),
-  hasTap: z.boolean().default(false),
+  hasTap: z.boolean().optional().nullable().default(null),
   isReturnableContainer: z.boolean().default(true),
 
   // Precios

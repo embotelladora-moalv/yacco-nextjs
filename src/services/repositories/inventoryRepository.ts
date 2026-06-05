@@ -36,12 +36,13 @@ export const inventoryRepository = {
     { revalidate: 3600, tags: ["products"] }
   ),
 
-  async createProduct(data: Partial<Product>): Promise<string> {
+  async createProduct(data: any): Promise<string> {
     const ref = adminDb.collection(PRODUCTS_COLLECTION).doc();
+    const { initialStockEmpty, initialStockFilled, ...cleanData } = data;
     await ref.set({
-      ...data,
-      stockEmpty: data.stockEmpty || 0,
-      stockFilled: data.stockFilled || 0,
+      ...cleanData,
+      stockEmpty: initialStockEmpty || 0,
+      stockFilled: initialStockFilled || 0,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });

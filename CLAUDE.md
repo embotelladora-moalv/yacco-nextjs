@@ -130,6 +130,7 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 - **Geolocalización de clientes**: Extracción de lat/lng de enlaces de Google Maps (resolución de enlaces acortados `maps.app.goo.gl` con rate-limit y caché local, parser con prioridad pin > cámara > query). Actualizados 476 clientes con coordenadas y metadatos (`geoSource`, `geoStatus`) en Firestore.
 - **Convención reforzada**: código en inglés, UI en español.
 - **Doc académica I-VIII generada** en `docs/proyecto/` (con placeholders).
+- **Atributo `hasTap` e Informe de Planta**: Se agregó el campo opcional/nullable `hasTap` (boolean) en la entidad `Product` para indicar si un envase/bidón tiene caño o no, configurable en el formulario de producto. Se implementó la página de reporte `/inventory/report` para desglosar el stock de envases en planta (llenos y vacíos) con y sin caño. Queda pendiente integrar los saldos de envases en clientes.
 
 ### Pendientes siguientes
 

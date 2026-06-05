@@ -16,7 +16,7 @@ export interface Product {
 
   volumeCapacity: number;
   unitOfMeasure: "L" | "ml" | "Gal" | "Oz";
-  hasTap: boolean;
+  hasTap?: boolean | null;
   isReturnableContainer: boolean;
 
   priceRefill: number;
