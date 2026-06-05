@@ -50,6 +50,7 @@ export function ProductionModal({ products }: ProductionModalProps) {
       productId: "",
       quantityProduced: 0,
       productionDate: new Date().toISOString().split("T")[0],
+      expirationDate: "",
       isTollManufacturing: false,
       brandName: "",
       notes: "",
@@ -58,6 +59,19 @@ export function ProductionModal({ products }: ProductionModalProps) {
 
   // Observamos el producto seleccionado para automatizar la Maquila
   const selectedProductId = form.watch("productId");
+  const productionDate = form.watch("productionDate");
+
+  // Auto-calcular fecha de vencimiento (+6 meses) al cambiar la fecha de producción
+  useEffect(() => {
+    if (productionDate) {
+      const prodDate = new Date(productionDate + "T12:00:00");
+      if (!isNaN(prodDate.getTime())) {
+        const expDate = new Date(prodDate);
+        expDate.setMonth(expDate.getMonth() + 6);
+        form.setValue("expirationDate", expDate.toISOString().split("T")[0]);
+      }
+    }
+  }, [productionDate, form]);
 
   useEffect(() => {
     const product = producibleProducts.find((p) => p.id === selectedProductId);
@@ -112,7 +126,7 @@ export function ProductionModal({ products }: ProductionModalProps) {
 
         <form onSubmit={form.handleSubmit(onSubmit)} className="p-8 space-y-8">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {/* Fecha */}
+            {/* Fecha Producción */}
             <div className="space-y-2">
               <Label className="font-bold text-slate-700 ml-1">
                 Fecha de Producción
@@ -127,8 +141,23 @@ export function ProductionModal({ products }: ProductionModalProps) {
               </div>
             </div>
 
-            {/* Producto */}
+            {/* Fecha Vencimiento */}
             <div className="space-y-2">
+              <Label className="font-bold text-slate-700 ml-1">
+                Fecha de Vencimiento
+              </Label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                <Input
+                  {...form.register("expirationDate")}
+                  type="date"
+                  className="h-11 pl-10 rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white transition-colors"
+                />
+              </div>
+            </div>
+
+            {/* Producto */}
+            <div className="space-y-2 sm:col-span-2">
               <Label className="font-bold text-slate-700 ml-1">
                 Producto / SKU
               </Label>

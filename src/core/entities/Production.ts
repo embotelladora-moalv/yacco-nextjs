@@ -3,6 +3,7 @@ export interface ProductionBatch {
   productId: string;
   quantityProduced: number;
   productionDate: Date;
+  expirationDate?: Date;
   managerId: string; // ID del encargado responsable
 
   // Requisito: Maquila
@@ -27,6 +28,7 @@ export interface KardexLog {
   productId: string;
   type: "IN" | "OUT";
   quantity: number;
+  lotNumber?: string;
   referenceId: string; // ID del ProductionBatch, ShrinkageLog o Sale
   referenceType: "PRODUCTION" | "SHRINKAGE" | "SALE" | "RETURN";
   previousStock: number;

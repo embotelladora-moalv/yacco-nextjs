@@ -36,6 +36,7 @@ export type ProductFormValues = z.infer<typeof productSchema>;
 export const productionBatchSchema = z
   .object({
     productionDate: z.string().min(1, "La fecha es obligatoria"), // String para inputs tipo date
+    expirationDate: z.string().optional(), // Vencimiento opcional (formato YYYY-MM-DD)
     productId: z.string().min(1, "Debe seleccionar el producto producido"),
     quantityProduced: z.coerce
       .number()

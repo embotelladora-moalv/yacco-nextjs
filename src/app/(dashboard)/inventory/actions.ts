@@ -55,7 +55,10 @@ export async function registerProductionAction(
     await inventoryRepository.registerProduction({
       productId: parsed.productId,
       quantityProduced: parsed.quantityProduced,
-      productionDate: new Date(parsed.productionDate), // Pasamos la fecha exacta del formulario
+      productionDate: new Date(parsed.productionDate + "T12:00:00"), // Evitar problemas de zona horaria
+      expirationDate: parsed.expirationDate
+        ? new Date(parsed.expirationDate + "T12:00:00")
+        : undefined,
       isTollManufacturing: parsed.isTollManufacturing,
       brandName: data.isTollManufacturing ? data.brandName || "" : "",
       notes: parsed.notes,
