@@ -54,6 +54,7 @@ export interface SaleItem {
   quantity: number;
   unitPrice: number;
   subtotal: number;
+  lotNumber?: string; // Lote asignado
 }
 
 export interface SaleEmptyReturn {

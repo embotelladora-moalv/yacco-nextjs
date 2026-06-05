@@ -11,6 +11,7 @@ const SALES_COLLECTION = "sales";
 const CUSTOMERS_COLLECTION = "customers";
 const DISPATCH_COLLECTION = "dispatchManifests";
 const PRODUCTS_COLLECTION = "products";
+const PRODUCTION_COLLECTION = "productionBatches";
 
 export const salesRepository = {
   /**
@@ -55,8 +56,10 @@ export const salesRepository = {
         }
       }
 
-      // Leer productos si es venta en planta para tener los stocks previos para el Kardex
+      // Leer productos si es venta en planta para tener los stocks previos para el Kardex y validar lotes FEFO
       const productDocsMap: Record<string, any> = {};
+      const productBatchesMap: Record<string, any[]> = {};
+
       if (data.saleType === "PLANT") {
         const uniqueProductIds = Array.from(
           new Set([
@@ -71,6 +74,130 @@ export const salesRepository = {
             throw new Error(`Producto ${pId} no encontrado en el catálogo.`);
           }
           productDocsMap[pId] = pDoc.data();
+        }
+
+        // Consultar y ordenar lotes por FEFO para los productos vendidos
+        const soldProductIds = Array.from(new Set(data.items.map((i) => i.productId)));
+        for (const pId of soldProductIds) {
+          const batchesQuery = await transaction.get(
+            adminDb
+              .collection(PRODUCTION_COLLECTION)
+              .where("productId", "==", pId)
+              .where("currentStock", ">", 0)
+              .orderBy("currentStock", "asc")
+          );
+
+          const availableBatches = batchesQuery.docs
+            .map((doc) => {
+              const bData = doc.data();
+              return {
+                id: doc.id,
+                ref: doc.ref,
+                currentStock: bData.currentStock || 0,
+                productionDate: bData.productionDate
+                  ? (bData.productionDate instanceof admin.firestore.Timestamp
+                      ? bData.productionDate.toDate()
+                      : new Date(bData.productionDate))
+                  : new Date(0),
+                expirationDate: bData.expirationDate
+                  ? (bData.expirationDate instanceof admin.firestore.Timestamp
+                      ? bData.expirationDate.toDate()
+                      : new Date(bData.expirationDate))
+                  : null,
+                lotNumber: bData.lotNumber || "GENERIC",
+              };
+            })
+            .sort((a, b) => {
+              const aExp = a.expirationDate ? a.expirationDate.getTime() : Infinity;
+              const bExp = b.expirationDate ? b.expirationDate.getTime() : Infinity;
+              if (aExp !== bExp) {
+                return aExp - bExp; // FEFO: primero en vencer
+              }
+              // Desempate por producción más antigua (FIFO)
+              return a.productionDate.getTime() - b.productionDate.getTime();
+            });
+
+          productBatchesMap[pId] = availableBatches;
+        }
+
+        // Validar que la suma de stock vivo en lotes alcance para la venta o que el lote específico tenga stock suficiente para maquila
+        for (const item of data.items) {
+          const productData = productDocsMap[item.productId];
+          const isMaquila = productData?.isMaquila === true;
+          const isBottleOnly = item.itemSaleType === "BOTTLE";
+
+          if (isBottleOnly) continue;
+
+          const availableBatches = productBatchesMap[item.productId] || [];
+
+          if (isMaquila) {
+            if (!item.lotNumber) {
+              throw new Error(
+                `Debe seleccionar un lote para el producto de maquila: ${productData?.name || item.productId}`
+              );
+            }
+            const matchingBatch = availableBatches.find((b) => b.lotNumber === item.lotNumber);
+            if (!matchingBatch) {
+              throw new Error(
+                `Lote ${item.lotNumber} no encontrado o sin stock para el producto de maquila: ${productData?.name || item.productId}`
+              );
+            }
+            if (matchingBatch.currentStock < item.quantity) {
+              throw new Error(
+                `Stock insuficiente en el lote ${item.lotNumber} para ${productData?.name || item.productId}. Disponible: ${matchingBatch.currentStock}, Solicitado: ${item.quantity}.`
+              );
+            }
+          } else {
+            // Producto estándar: validar suma total de lotes
+            const totalAvailable = availableBatches.reduce((acc, b) => acc + b.currentStock, 0);
+            if (totalAvailable < item.quantity) {
+              throw new Error(
+                `Stock de lotes insuficiente para ${productData?.name || item.productId}. El catálogo general dice tener ${productData?.stockFilled || 0}, pero la suma de los lotes vivos es ${totalAvailable} e intentas vender ${item.quantity}.`
+              );
+            }
+          }
+        }
+      }
+
+      const manifestLotsMap: Record<string, any[]> = {};
+
+      if (data.saleType === "ROUTE" && manifest) {
+        // Obtener los lotes cargados en este camión
+        const loadedItems = manifest.items || [];
+        const productIdsOnTruck: string[] = Array.from(new Set(loadedItems.map((i: any) => i.productId as string)));
+
+        for (const pId of productIdsOnTruck) {
+          const lotsForProduct = loadedItems
+            .filter((i: any) => i.productId === pId)
+            .map((i: any) => i.lotNumber);
+
+          if (lotsForProduct.length > 0) {
+            const batchesQuery = await transaction.get(
+              adminDb
+                .collection(PRODUCTION_COLLECTION)
+                .where("productId", "==", pId)
+                .where("lotNumber", "in", lotsForProduct.slice(0, 10))
+            );
+
+            const batchDocs = batchesQuery.docs.map((doc) => {
+              const bData = doc.data();
+              return {
+                lotNumber: bData.lotNumber,
+                expirationDate: bData.expirationDate
+                  ? (bData.expirationDate instanceof admin.firestore.Timestamp
+                      ? bData.expirationDate.toDate()
+                      : new Date(bData.expirationDate))
+                  : null,
+                productionDate: bData.productionDate
+                  ? (bData.productionDate instanceof admin.firestore.Timestamp
+                      ? bData.productionDate.toDate()
+                      : new Date(bData.productionDate))
+                  : new Date(0),
+              };
+            });
+
+            manifestLotsMap[pId] = batchDocs;
+          }
         }
       }
 
@@ -119,6 +246,120 @@ export const salesRepository = {
       }
 
       // 5. Estructurar el documento de Venta (El Ticket)
+      const finalSaleItems: any[] = [];
+      if (data.saleType === "PLANT") {
+        data.items.forEach((item) => {
+          const productData = productDocsMap[item.productId];
+          const isMaquila = productData?.isMaquila === true;
+          const isBottleOnly = item.itemSaleType === "BOTTLE";
+
+          if (isBottleOnly) {
+            finalSaleItems.push({
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              subtotal: item.quantity * item.unitPrice,
+              lotNumber: "",
+            });
+            return;
+          }
+
+          const availableBatches = productBatchesMap[item.productId] || [];
+
+          if (isMaquila) {
+            // Para maquila, consumimos exactamente del lote seleccionado
+            const batch = availableBatches.find((b) => b.lotNumber === item.lotNumber);
+            if (!batch) {
+              throw new Error(`Error inesperado: Lote maquila ${item.lotNumber} no disponible.`);
+            }
+            finalSaleItems.push({
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              subtotal: item.quantity * item.unitPrice,
+              lotNumber: batch.lotNumber,
+            });
+          } else {
+            // Producto estándar: FEFO
+            let remainingToFulfill = item.quantity;
+
+            for (const batch of availableBatches) {
+              if (remainingToFulfill <= 0) break;
+              const takeFromBatch = Math.min(batch.currentStock, remainingToFulfill);
+              finalSaleItems.push({
+                productId: item.productId,
+                quantity: takeFromBatch,
+                unitPrice: item.unitPrice,
+                subtotal: takeFromBatch * item.unitPrice,
+                lotNumber: batch.lotNumber,
+              });
+              remainingToFulfill -= takeFromBatch;
+            }
+
+            if (remainingToFulfill > 0) {
+              finalSaleItems.push({
+                productId: item.productId,
+                quantity: remainingToFulfill,
+                unitPrice: item.unitPrice,
+                subtotal: remainingToFulfill * item.unitPrice,
+                lotNumber: "GENERIC",
+              });
+            }
+          }
+        });
+      } else {
+        // Venta en ruta: consumir lotes del camión por FEFO
+        data.items.forEach((item) => {
+          const truckLots = (manifest.items || [])
+            .filter((mItem: any) => mItem.productId === item.productId)
+            .map((mItem: any) => {
+              const batchDetails = (manifestLotsMap[item.productId] || [])
+                .find((b) => b.lotNumber === mItem.lotNumber);
+              return {
+                mItem,
+                lotNumber: mItem.lotNumber,
+                expirationDate: batchDetails?.expirationDate || null,
+                productionDate: batchDetails?.productionDate || new Date(0),
+                availableQty: mItem.quantityLoaded - (mItem.quantitySold || 0),
+              };
+            })
+            .sort((a: any, b: any) => {
+              const aExp = a.expirationDate ? a.expirationDate.getTime() : Infinity;
+              const bExp = b.expirationDate ? b.expirationDate.getTime() : Infinity;
+              if (aExp !== bExp) {
+                return aExp - bExp; // FEFO
+              }
+              return a.productionDate.getTime() - b.productionDate.getTime(); // FIFO desempate
+            });
+
+          let remainingToFulfill = item.quantity;
+
+          for (const tLot of truckLots) {
+            if (remainingToFulfill <= 0) break;
+            const takeFromTruck = Math.min(tLot.availableQty, remainingToFulfill);
+            if (takeFromTruck <= 0) continue;
+
+            tLot.mItem.quantitySold = (tLot.mItem.quantitySold || 0) + takeFromTruck;
+
+            finalSaleItems.push({
+              productId: item.productId,
+              quantity: takeFromTruck,
+              unitPrice: item.unitPrice,
+              subtotal: takeFromTruck * item.unitPrice,
+              lotNumber: tLot.lotNumber,
+            });
+
+            remainingToFulfill -= takeFromTruck;
+          }
+
+          if (remainingToFulfill > 0) {
+            throw new Error(
+              `Stock insuficiente en el camión para el producto ${item.productId}. Intentas vender ${item.quantity} pero solo quedan ${item.quantity - remainingToFulfill} unidades disponibles en la carga del camión.`
+            );
+          }
+        });
+      }
+
       const saleDoc: any = {
         id: newSaleRef.id,
         manifestId:
@@ -128,12 +369,7 @@ export const salesRepository = {
         customerId: data.customerId,
         customerName: customer.name || "Cliente Desconocido",
         customerAlias: customer.alias || "",
-        items: data.items.map((item) => ({
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          subtotal: item.quantity * item.unitPrice,
-        })),
+        items: finalSaleItems,
         returnedEmpties: data.returnedEmpties,
         totalAmount,
         paymentMethod: data.paymentMethod,
@@ -165,35 +401,16 @@ export const salesRepository = {
 
       // C) ACTUALIZAR INVENTARIOS SEGÚN EL TIPO DE VENTA
       if (data.saleType === "ROUTE" && manifestRef && manifest) {
-        // VENTA EN RUTA: Actualizar los Llenos vendidos en el camión
-        const updatedItems = (manifest.items || []).map((mItem: any) => {
-          const soldItem = data.items.find(
-            (i) => i.productId === mItem.productId,
-          );
-          if (soldItem) {
-            return {
-              ...mItem,
-              quantitySold: (mItem.quantitySold || 0) + soldItem.quantity,
-            };
-          }
-          return mItem;
-        });
-
-        // 🔥 CORRECCIÓN CLAVE:
-        // Hemos eliminado el bloque que sumaba los `returnedEmpties` al manifiesto.
-        // La venta en ruta NO debe registrar los vacíos en el manifiesto todavía,
-        // ya que el chofer los tiene en el camión. Solo se guardan en el ticket de venta.
-        // El manifiesto se actualizará recién cuando el chofer los descargue en el Pit Stop o Liquidación.
-
+        // VENTA EN RUTA: Actualizar el manifiesto con los ítems y cantidades vendidas desglosadas por lote
         transaction.update(manifestRef, {
           cashExpected: (manifest.cashExpected || 0) + data.cashReceived,
           digitalPaymentsExpected:
             (manifest.digitalPaymentsExpected || 0) + data.digitalReceived,
-          items: updatedItems,
+          items: manifest.items,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       } else if (data.saleType === "PLANT") {
-        // VENTA EN PLANTA: Actualizar el almacén central directo (Descontar llenos, aumentar vacíos) y registrar en Kardex
+        // VENTA EN PLANTA: Actualizar el almacén central directo (Descontar llenos, aumentar vacíos), descontar de lotes y registrar en Kardex
         data.items.forEach((item) => {
           const productRef = adminDb
             .collection(PRODUCTS_COLLECTION)
@@ -203,29 +420,90 @@ export const salesRepository = {
           const previousStock = productData?.stockFilled || 0;
           const newStock = previousStock - item.quantity;
 
+          const isMaquila = productData?.isMaquila === true;
+          const isBottleOnly = item.itemSaleType === "BOTTLE";
+
+          if (isBottleOnly) return; // Si es solo envase vacío, no descuenta stock de lote de producto lleno ni registra egreso de lleno
+
           transaction.update(productRef, {
             stockFilled: newStock,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
 
-          // Registrar en Kardex
-          const kardexRef = adminDb.collection("kardexLogs").doc();
-          transaction.set(kardexRef, {
-            productId: item.productId,
-            type: "OUT",
-            phase: "FILLED",
-            quantity: item.quantity,
-            referenceId: newSaleRef.id,
-            referenceType: "SALE",
-            previousStock: previousStock,
-            newStock: newStock,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            // Nuevos campos
-            movementType: "SALE",
-            delta: -item.quantity,
-            resultingBalance: newStock,
-            userId: registeredBy || "SYSTEM",
-          });
+          const availableBatches = productBatchesMap[item.productId] || [];
+
+          if (isMaquila) {
+            // Descontar del lote específico para maquila
+            const batch = availableBatches.find((b) => b.lotNumber === item.lotNumber);
+            if (!batch) {
+              throw new Error(`Error inesperado: Lote maquila ${item.lotNumber} no disponible en escritura.`);
+            }
+
+            transaction.update(batch.ref, {
+              currentStock: batch.currentStock - item.quantity,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            const batchNewStock = previousStock - item.quantity;
+
+            // Registrar en Kardex para este lote específico
+            const kardexRef = adminDb.collection("kardexLogs").doc();
+            transaction.set(kardexRef, {
+              productId: item.productId,
+              type: "OUT",
+              phase: "FILLED",
+              quantity: item.quantity,
+              lotNumber: batch.lotNumber,
+              referenceId: newSaleRef.id,
+              referenceType: "SALE",
+              previousStock: previousStock,
+              newStock: batchNewStock,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              movementType: "SALE",
+              delta: -item.quantity,
+              resultingBalance: batchNewStock,
+              userId: registeredBy || "SYSTEM",
+            });
+          } else {
+            // Producto estándar: FEFO
+            let remainingToFulfill = item.quantity;
+            let currentPreviousStock = previousStock;
+
+            for (const batch of availableBatches) {
+              if (remainingToFulfill <= 0) break;
+              const takeFromBatch = Math.min(batch.currentStock, remainingToFulfill);
+
+              transaction.update(batch.ref, {
+                currentStock: batch.currentStock - takeFromBatch,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+
+              const batchNewStock = currentPreviousStock - takeFromBatch;
+
+              // Registrar en Kardex para este lote específico
+              const kardexRef = adminDb.collection("kardexLogs").doc();
+              transaction.set(kardexRef, {
+                productId: item.productId,
+                type: "OUT",
+                phase: "FILLED",
+                quantity: takeFromBatch,
+                lotNumber: batch.lotNumber,
+                referenceId: newSaleRef.id,
+                referenceType: "SALE",
+                previousStock: currentPreviousStock,
+                newStock: batchNewStock,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                // Nuevos campos
+                movementType: "SALE",
+                delta: -takeFromBatch,
+                resultingBalance: batchNewStock,
+                userId: registeredBy || "SYSTEM",
+              });
+
+              currentPreviousStock = batchNewStock;
+              remainingToFulfill -= takeFromBatch;
+            }
+          }
         });
 
         data.returnedEmpties.forEach((empty) => {
