@@ -131,6 +131,15 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 - **Convención reforzada**: código en inglés, UI en español.
 - **Doc académica I-VIII generada** en `docs/proyecto/` (con placeholders).
 - **Atributo `hasTap` e Informe de Planta**: Se agregó el campo opcional/nullable `hasTap` (boolean) en la entidad `Product` para indicar si un envase/bidón tiene caño o no, configurable en el formulario de producto. Se implementó la página de reporte `/inventory/report` para desglosar el stock de envases en planta (llenos y vacíos) con y sin caño. Queda pendiente integrar los saldos de envases en clientes.
+- **Trazabilidad de Lotes end-to-end con FEFO híbrido** (branch `feat/lot-traceability-fefo`):
+  - `ProductionBatch` ahora tiene `expirationDate` (default: +6 meses, editable).
+  - **Ventas en Planta**: consumen batch `currentStock` automáticamente por FEFO (primero en vencer, primero en salir). Si un ítem abarca múltiples lotes, la venta se registra con líneas separadas por lote en `Sale.items`.
+  - **Ventas en Ruta**: consumen del inventario cargado en el `DispatchManifest`. Se aplica FEFO sobre los lotes cargados en camión consultando `expirationDate` de `productionBatches`. Actualizan `quantitySold` en el manifiesto.
+  - **Productos Maquila** (`Product.isMaquila === true`): requieren selección manual de lote en el formulario de venta en planta (dropdown morado). Backend valida que el `lotNumber` sea proporcionado y descuenta únicamente de ese batch.
+  - `SaleItem.lotNumber` y `KardexLog.lotNumber` guardan el lote asociado en cada movimiento.
+  - Reporte de stock por lote en `/inventory/report/lots` muestra: lotNumber, fechas, estado (Vigente/Por Vencer/Vencido), stock vivo, consumido.
+  - Scripts de backfill: `scripts/backfill/expiration-date.ts`, `scripts/backfill/verify-batch-discrepancies.ts`, `scripts/backfill/create-historical-batches.ts`.
+  - **REGLA CRÍTICA**: `productionBatches.currentStock` se descuenta atómicamente en la misma transacción que actualiza `products.stockFilled`. Ambos deben estar siempre sincronizados.
 
 ### Pendientes siguientes
 
@@ -207,3 +216,6 @@ Documentación completa en `docs/REVISION-CODIGO.md`, `docs/ARQUITECTURA.md`,
 | **IGV** | Impuesto General a las Ventas (18% en Perú). |
 | **Manifiesto/Despacho** | Carga que sale en un camión a una ruta. |
 | **Liquidación** | Cuadre al regreso del camión: ventas, vueltos, vacíos, mermas. |
+| **FEFO** | First-Expired, First-Out — estrategia de consumo de lotes por fecha de vencimiento más próxima. |
+| **Lote (ProductionBatch)** | Registro de producción diario por producto. Formato: `L-YYYYMMDD`. Tiene `currentStock` (stock vivo). |
+| **Maquila** | Producción a nombre de otra marca. Los lotes de maquila se seleccionan manualmente en ventas. |
