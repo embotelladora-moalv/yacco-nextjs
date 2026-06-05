@@ -59,10 +59,23 @@ export function InventoryDashboard({ products }: InventoryDashboardProps) {
           {/* Modal para Producción del Día */}
           <ProductionModal products={products} />
 
+          {/* Botón para Ver Informe de Planta */}
+          <Button
+            asChild
+            variant="outline"
+            className="border-slate-200 hover:bg-slate-50 font-bold"
+            id="btn-view-report"
+          >
+            <Link href="/inventory/report">
+              <Package className="mr-2 h-4 w-4 text-blue-600" /> Informe de Planta
+            </Link>
+          </Button>
+
           {/* Botón para Crear Nuevo Producto en Catálogo */}
           <Button
             asChild
             className="bg-blue-700 hover:bg-blue-800 font-black shadow-lg shadow-blue-600/20"
+            id="btn-create-product"
           >
             <Link href="/inventory/new">
               <Plus className="mr-2 h-4 w-4" /> Nuevo Producto

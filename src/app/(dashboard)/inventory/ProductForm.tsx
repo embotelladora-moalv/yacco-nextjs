@@ -41,7 +41,7 @@ export function ProductForm({
       brandName: "",
       volume: 20,
       unit: "L",
-      hasTap: false,
+      hasTap: null,
       isReturnableContainer: true,
       priceRefill: 0,
       priceFull: 0,
@@ -56,8 +56,15 @@ export function ProductForm({
   const category = form.watch("operationalCategory");
   const isMaquila = form.watch("isMaquila");
   const isReturnable = form.watch("isReturnableContainer");
+  const packagingType = form.watch("packagingType");
 
   const isAccessory = category === "ACCESSORY";
+
+  useEffect(() => {
+    if (packagingType && !packagingType.toLowerCase().includes("bidón")) {
+      form.setValue("hasTap", null);
+    }
+  }, [packagingType, form]);
 
   const onSubmit = async (values: ProductFormValues) => {
     setIsPending(true);
@@ -228,6 +235,28 @@ export function ProductForm({
                   )}
                 />
               </div>
+
+              {/* TOGGLE TIENE CAÑO (Visible solo para Bidón) */}
+              {packagingType && packagingType.toLowerCase().includes("bidón") && (
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 animate-in fade-in slide-in-from-top-1">
+                  <div>
+                    <Label className="font-bold text-slate-700">¿Tiene Caño?</Label>
+                    <p className="text-[10px] text-slate-500 font-medium">
+                      Activar si el bidón viene con caño/grifo incorporado.
+                    </p>
+                  </div>
+                  <Controller
+                    name="hasTap"
+                    control={form.control}
+                    render={({ field }) => (
+                      <Switch
+                        checked={!!field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    )}
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}
