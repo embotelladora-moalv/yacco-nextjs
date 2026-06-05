@@ -71,6 +71,18 @@ export function InventoryDashboard({ products }: InventoryDashboardProps) {
             </Link>
           </Button>
 
+          {/* Botón para Ver Stock por Lote */}
+          <Button
+            asChild
+            variant="outline"
+            className="border-purple-200 hover:bg-purple-50 font-bold text-purple-700"
+            id="btn-view-lot-report"
+          >
+            <Link href="/inventory/report/lots">
+              <History className="mr-2 h-4 w-4 text-purple-600" /> Stock por Lote
+            </Link>
+          </Button>
+
           {/* Botón para Crear Nuevo Producto en Catálogo */}
           <Button
             asChild
