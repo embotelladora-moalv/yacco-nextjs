@@ -61,6 +61,7 @@ export const saleItemSchema = z.object({
   productId: z.string().min(1, "Seleccione un producto"),
   quantity: z.coerce.number().min(1, "Debe vender al menos 1"),
   unitPrice: z.coerce.number().min(0),
+  lotNumber: z.string().optional(), // Lote seleccionado o auto-asignado
   description: z.string().optional(),
   itemSaleType: z
     .enum(["REFILL", "FULL", "BOTTLE", "STANDARD"])

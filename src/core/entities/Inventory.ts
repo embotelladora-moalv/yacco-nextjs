@@ -41,6 +41,7 @@ export interface ProductionBatch {
   quantityProduced: number; // El total histórico producido ese día
   currentStock: number; // <-- NUEVO: Cuántos quedan de este lote en almacén
   productionDate: Date;
+  expirationDate?: Date; // Vencimiento del lote (opcional en creación, FEFO)
   managerId: string;
   isTollManufacturing: boolean;
   brandName?: string; // Nombre de la marca externa (Ej: "Agua María")
@@ -69,6 +70,7 @@ export interface KardexLog {
   type: "IN" | "OUT";
   phase: "EMPTY" | "FILLED"; // ¿Se movió stock vacío o stock lleno?
   quantity: number;
+  lotNumber?: string; // Lote asociado al movimiento
 
   // Trazabilidad
   referenceId: string; // El ID del Lote, de la Merma, de la Venta o de la Compra

@@ -78,8 +78,8 @@ export const dispatchRepository = {
               a.productionDate.toDate().getTime() -
               b.productionDate.toDate().getTime(),
           );
-
         let remainingToFulfill = item.quantityRequested;
+        let currentProductPreviousStock = productData.stockFilled;
 
         // C. Algoritmo de Descuento FIFO
         for (const batch of availableBatches) {
@@ -106,6 +106,30 @@ export const dispatchRepository = {
             newStock: batch.currentStock - takeFromBatch,
           });
 
+          // Preparamos el Kardex por lote
+          const lotNewStock = currentProductPreviousStock - takeFromBatch;
+          const kardexRef = adminDb.collection(KARDEX_COLLECTION).doc();
+          kardexEntries.push({
+            ref: kardexRef,
+            data: {
+              productId: item.productId,
+              type: "OUT",
+              phase: "FILLED",
+              quantity: takeFromBatch,
+              lotNumber: batch.lotNumber,
+              referenceType: "DISPATCH",
+              previousStock: currentProductPreviousStock,
+              newStock: lotNewStock,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              // Nuevos campos
+              movementType: "DISPATCH",
+              delta: -takeFromBatch,
+              resultingBalance: lotNewStock,
+              userId: dispatcherId || "SYSTEM",
+            },
+          });
+
+          currentProductPreviousStock = lotNewStock;
           remainingToFulfill -= takeFromBatch;
         }
 
@@ -116,29 +140,9 @@ export const dispatchRepository = {
           );
         }
 
-        // E. Preparar actualización del producto general y Kardex
+        // E. Preparar actualización del producto general
         const newFilledStock = productData.stockFilled - item.quantityRequested;
         productUpdates.push({ ref: productRef, newFilledStock });
-
-        const kardexRef = adminDb.collection(KARDEX_COLLECTION).doc();
-        kardexEntries.push({
-          ref: kardexRef,
-          data: {
-            productId: item.productId,
-            type: "OUT",
-            phase: "FILLED",
-            quantity: item.quantityRequested,
-            referenceType: "DISPATCH",
-            previousStock: productData.stockFilled,
-            newStock: newFilledStock,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            // Nuevos campos
-            movementType: "DISPATCH",
-            delta: -item.quantityRequested,
-            resultingBalance: newFilledStock,
-            userId: dispatcherId || "SYSTEM",
-          },
-        });
       }
 
       // 2. ESCRIBIR TODAS LAS ACTUALIZACIONES EN LA BASE DE DATOS
@@ -380,6 +384,7 @@ export const dispatchRepository = {
               type: "IN",
               phase: "FILLED",
               quantity: reportedItem.quantityReturnedFull,
+              lotNumber: reportedItem.lotNumber,
               referenceType: "ROUTE_RETURN",
               referenceId: manifestId,
               previousStock: currentFilled,

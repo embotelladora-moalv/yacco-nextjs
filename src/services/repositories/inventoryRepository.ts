@@ -131,7 +131,7 @@ export const inventoryRepository = {
       const dateStr = dateIso.replace(/-/g, "");
       const lotNumber = `L-${dateStr}`;
 
-      // 2. BUSCAR SI YA EXISTE PRODUCCIÓN HOY PARA ESTE PRODUCTO
+            // 2. BUSCAR SI YA EXISTE PRODUCCIÓN HOY PARA ESTE PRODUCTO
       const batchQuery = await transaction.get(
         adminDb
           .collection(PRODUCTION_COLLECTION)
@@ -139,6 +139,15 @@ export const inventoryRepository = {
           .where("lotNumber", "==", lotNumber)
           .limit(1),
       );
+
+      // Calcular la fecha de vencimiento si no se proporciona (default + 6 meses)
+      const productionDateVal = batch.productionDate;
+      let expirationDateVal = batch.expirationDate;
+      if (!expirationDateVal) {
+        const exp = new Date(productionDateVal);
+        exp.setMonth(exp.getMonth() + 6);
+        expirationDateVal = exp;
+      }
 
       let batchRef;
 
@@ -152,6 +161,7 @@ export const inventoryRepository = {
             existingData.quantityProduced + batch.quantityProduced,
           currentStock:
             (existingData.currentStock || 0) + batch.quantityProduced,
+          expirationDate: existingData.expirationDate || expirationDateVal,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       } else {
@@ -159,6 +169,7 @@ export const inventoryRepository = {
         batchRef = adminDb.collection(PRODUCTION_COLLECTION).doc();
         transaction.set(batchRef, {
           ...batch,
+          expirationDate: expirationDateVal,
           lotNumber: lotNumber,
           currentStock: batch.quantityProduced, // El stock inicial es lo que acabamos de producir
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -207,6 +218,7 @@ export const inventoryRepository = {
         type: "IN",
         phase: "FILLED",
         quantity: batch.quantityProduced,
+        lotNumber: lotNumber,
         referenceId: batchRef.id,
         referenceType: "PRODUCTION",
         previousStock: currentFilled,
@@ -360,5 +372,18 @@ export const inventoryRepository = {
         });
       }
     );
+  },
+
+  async getActiveBatches(): Promise<ProductionBatch[]> {
+    const snapshot = await adminDb
+      .collection(PRODUCTION_COLLECTION)
+      .where("currentStock", ">", 0)
+      .get();
+    return snapshot.docs.map((doc) =>
+      serializeFirestoreData({
+        id: doc.id,
+        ...doc.data(),
+      })
+    ) as ProductionBatch[];
   },
 };
