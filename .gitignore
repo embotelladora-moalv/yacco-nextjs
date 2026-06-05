@@ -55,3 +55,4 @@ keys/
 /scripts/backfill/*.json
 liquidation-time-report.json
 /scripts/audit/*.json
+/scripts/cleanup/*.json
