@@ -2,7 +2,8 @@ import { customerRepository } from "@/services/repositories/customerRepository";
 import { inventoryRepository } from "@/services/repositories/inventoryRepository";
 import { dispatchRepository } from "@/services/repositories/dispatchRepository";
 import { orderRepository } from "@/services/repositories/orderRepository";
-import { adminDb } from "@/services/firebase/admin"; // Inyección de la base de datos de administración
+import { salesRepository } from "@/services/repositories/salesRepository";
+import { Sale } from "@/core/entities/CRM";
 import { SaleForm } from "../SaleForm";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -34,25 +35,10 @@ export default async function NewSalePage({ searchParams }: PageProps) {
 
   // 2. 🔥 NUEVO: Traemos todas las ventas asociadas a los camiones activos para calcular el stock real remanente
   const manifestIds = activeManifests.map((m) => m.id);
-  let allActiveSales: any[] = [];
+  let allActiveSales: Sale[] = [];
 
   if (manifestIds.length > 0) {
-    const salesSnap = await adminDb
-      .collection("sales")
-      .where("manifestId", "in", manifestIds)
-      .get();
-
-    // 🔥 CORRECCIÓN: Serializamos las fechas de Firestore a String (ISO)
-    allActiveSales = salesSnap.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-        deliveredAt: data.deliveredAt?.toDate?.()?.toISOString() || null,
-      } as any;
-    });
+    allActiveSales = await salesRepository.getSalesByManifestIds(manifestIds);
   }
 
   // 3. Cruzamos las ventas correspondientes dentro de cada manifiesto activo
