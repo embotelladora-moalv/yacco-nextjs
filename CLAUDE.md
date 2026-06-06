@@ -123,6 +123,23 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 
 ### Avances recientes
 
+- **Cobranzas y Pago Dirigido COMPLETO**:
+  - Confirmado que el sistema de cobranzas activo opera sobre `sales`/`debtPayments` (`salesRepository`).
+  - Implementación de **Pago Dirigido**: Permite seleccionar ventas específicas de la lista de pendientes y asignar montos individuales (toggle FIFO/Dirigido en `PaymentForm`).
+  - Autocalculo automático del monto total en modo dirigido en base a la suma de las asignaciones, marcando el input como `readOnly` para evitar discrepancias.
+  - Validación estricta en el servidor mediante transacción de saldos re-leídos de Firestore.
+  - Inclusión de `allocationMode` y `allocations` en `paymentSchema` y en los documentos de la colección `debtPayments`.
+  - Auditoría del cobro utilizando el `userId` real del operador activo (obtenido con `getUserSession()`).
+- **Catálogo de Bancos y Métodos de Pago COMPLETO**:
+  - Colección dedicada `banks` (nombre, cuenta opcional, activo), administrable desde `/settings` únicamente por usuarios con rol `ADMIN`.
+  - Al registrar cobranzas con método `TRANSFER`, se exige seleccionar banco (`bankId` + `bankName` desnormalizado). Los métodos `CASH` y `YAPE_PLIN` no requieren banco.
+  - Métodos de pago de cobranza reducidos a 3 (`CASH`, `TRANSFER`, `YAPE_PLIN`). El método de pago de ventas (`sales`: `CASH`/`DIGITAL`/`CREDIT`/`MIXED`) es independiente y no se tocó.
+- **Ficha de Cliente (Historial de Pagos) COMPLETO**:
+  - La vista `CustomerProfileClient` ahora renderiza de forma integrada el historial de cobranzas en modo solo lectura (`showCancelButton={false}` sobre `PaymentHistoryList`). La anulación de pagos permanece reservada para la página de cobranza.
+- **Consistencia Financiera y Fixes COMPLETA**:
+  - Fix en `PaymentForm` y `CollectionForm` agregando `valueAsNumber: true` / coerciones necesarias para evitar errores de tipo en el monto ("expected number, received string").
+  - Las ventas anuladas ya no figuran en cobranzas (la acción `cancelSaleAction` actualiza `remainingBalance` a 0 y las consultas de cobranza filtran por `status == "COMPLETED"`).
+  - La acción `confirmOrderDeliveryAction` ahora actualiza correctamente los campos `status`, `remainingBalance` y `paymentStatus` (antes la venta de entrega incrementaba la deuda total del cliente pero no aparecía listada en cobranzas).
 - **Trazabilidad de envases (3 fases) COMPLETA**:
   - Colección `customerContainerLogs` (`type`: `SALE`/`DELIVERY`/`ADJUSTMENT`/`REVERSAL`).
   - **Fase 1**: Escritura automática de logs en ventas y entregas en ruta.
@@ -140,16 +157,16 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 - **Pedidos**: Tipo de venta por línea (`REFILL`/`FULL`/`BOTTLE`) con tarifas personalizadas por cliente; se establece la sede principal (`isMain`/`isDefault`) y tipo `REFILL` por defecto.
 - **Pit-stop de ruta**: Fix de descuadres de stock (se aplican deltas acumulados en lugar de sobrescribir con valores absolutos), devolución de llenos por lote (permite corregir lotes erróneos y reingresar stock a su respectivo `productionBatch`) y actualización de la tarjeta de despacho mostrando ventas, cargas y stock a bordo en tiempo real.
 - **Auditoría con usuarios reales**: Inyección del `userId` real del operador obtenido de la sesión activa (`getUserSession()`) en kardex y transacciones de inventario, eliminando los placeholders `ADMIN_ID`/`ADMIN_PLANT`.
-- **confirmOrderDeliveryAction**: Migrada a transacción atómica; ahora actualiza correctamente los campos `containerBalances` y `debtAmount`.
 - **Normalización de fines de línea**: Se agregó el archivo `.gitattributes` en la raíz para normalizar EOL (LF/CRLF) y evitar ruidos masivos en commits.
 - **Migración app viejo COMPLETA**: 21k docs migrados, 0 huérfanos.
 - **hasTap configurable por empaque**: Configuración de `hasTap` (`true`/`false`/`null`) y reportes en planta asociados.
 
 ### Pendientes siguientes
 
-- 🚨 **DESPLEGAR ÍNDICES FIRESTORE (BLOQUEANTE)**: Varios filtros y consultas no funcionarán en base de datos real hasta ejecutar `firebase deploy --only firestore:indexes`. Afecta filtros de ventas anuladas (`status+createdAt`) e historial de envases (`customerId+createdAt`).
+- 🚨 **DESPLEGAR ÍNDICES FIRESTORE (BLOQUEANTE)**: Varios filtros y consultas no funcionarán en base de datos real hasta ejecutar `firebase deploy --only firestore:indexes`. Afecta filtros de ventas anuladas (`status+createdAt`), historial de envases (`customerId+createdAt`), ordenación de bancos (`isActive+name` ASC) e historial de cobranza.
 - 🚨 **Fase B de Anulaciones (Nota de Crédito/Baja)**: Anulación de ventas ya facturadas mediante la emisión de Nota de Crédito (tipo 07) o Baja formal de Boletas/Facturas ante SUNAT.
-- **Trabajo local NO pusheado a origin**: Toda la sesión está únicamente en la rama local `develop` y ramas de la sesión debido a restricciones de credenciales del agente.
+- 🚨 **RESET de producción pendiente**: Proceso crítico para limpiar el histórico transaccional en pruebas antes de la puesta en marcha real (dejar clientes con deuda a 0 y productos con stock manual a 0). Requiere dry-run y dump local de seguridad previo.
+- **Reporte Global de Cobranzas**: Implementar vista para consultar un histórico unificado de cobros (todos los clientes por rango de fechas). Actualmente solo se ven de forma individual por ficha de cliente.
 - Reimport de DNIs (Prompt D) cuando el Excel esté lleno.
 - Rellenar placeholders de la documentación académica (`docs/proyecto/`).
 - Bugs críticos vigentes: BUG-02 (fecha GRE), BUG-03 (worker SUNAT real), BUG-04 (seed).
@@ -162,7 +179,9 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 
 ### Deuda relevante
 
-- Ocurrencias de `as any` en el proyecto (reducidas sustancialmente esta sesión).
+- **Código Muerto en Cobranzas**: Componente `CollectionForm.tsx` (ningún componente lo importa) y `paymentRepository.ts` (lógica de cobro vieja basada en `orders`/`payments`). Se sugiere su remoción en una rama limpia.
+- **Modal de entrega rápida**: En `DispatchDetailsClient.tsx` se define el estado `saleModalOpen` pero no tiene ningún botón o trigger activo en la UI (latente).
+- Ocurrencias de `as any` en el proyecto (reducidas sustancialmente esta sesión, aunque persiste en los resolvers complejos de Zod/React Hook Form).
 - Cobertura de tests unitarios inicial (26 tests unitarios montados en Vitest), requiere expandirse a otros casos de uso.
 - `CustomerLocation` duplicado en `Customer.ts` y `CRM.ts` con shapes distintos.
 - URL de SUNAT BETA hardcodeada en 3 archivos (debería ser env var).
