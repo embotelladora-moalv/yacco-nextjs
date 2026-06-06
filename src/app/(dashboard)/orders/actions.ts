@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { adminDb } from "@/services/firebase/admin";
 import admin from "firebase-admin";
 import { OrderItem } from "@/core/entities/Order";
+import { getUserSession } from "@/services/firebase/auth";
+
 
 export async function createOrderAction(data: OrderFormValues) {
   try {
@@ -134,6 +136,11 @@ export async function confirmOrderDeliveryAction(
   },
 ) {
   try {
+    const session = await getUserSession();
+    if (!session) {
+      throw new Error("No hay una sesión activa. Vuelva a iniciar sesión.");
+    }
+
     const saleId = await adminDb.runTransaction(async (transaction) => {
       const orderRef = adminDb.collection("orders").doc(orderId);
       const orderSnap = await transaction.get(orderRef);
@@ -200,6 +207,7 @@ export async function confirmOrderDeliveryAction(
         cashReceived: paymentData.cash,
         digitalReceived: paymentData.digital,
         driverId: paymentData.driverId,
+        registeredBy: session.uid,
         totalAmount: calculatedTotalAmount,
         isBilled: false,
         billingSkipped: !requiresSunat,
@@ -226,6 +234,38 @@ export async function confirmOrderDeliveryAction(
         lastSaleDate: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+
+      // Registrar movimientos de envases (customerContainerLogs) si hay deltas
+      const deltaMap = new Map<string, number>();
+      (orderData.items || []).forEach((item: OrderItem) => {
+        deltaMap.set(item.productId, (deltaMap.get(item.productId) || 0) + Number(item.quantity || 0));
+      });
+      (paymentData.returnedEmpties || []).forEach((empty: { productId: string; quantity: number }) => {
+        deltaMap.set(empty.productId, (deltaMap.get(empty.productId) || 0) - Number(empty.quantity || 0));
+      });
+
+      const delta = Array.from(deltaMap.entries())
+        .map(([productId, d]) => ({ productId, delta: d }))
+        .filter((item) => item.delta !== 0);
+
+      if (delta.length > 0) {
+        const containerLogRef = adminDb.collection("customerContainerLogs").doc();
+        transaction.set(containerLogRef, {
+          id: containerLogRef.id,
+          customerId: orderData.customerId,
+          type: "DELIVERY",
+          saleId: newSaleRef.id,
+          manifestId: orderData.manifestId || null,
+          delta,
+          detail: {
+            items: (orderData.items || []).map((i: OrderItem) => ({ productId: i.productId, quantity: Number(i.quantity || 0) })),
+            returnedEmpties: (paymentData.returnedEmpties || []).map((e: { productId: string; quantity: number }) => ({ productId: e.productId, quantity: Number(e.quantity || 0) })),
+          },
+          balanceAfter: newContainerBalances,
+          userId: session.uid,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
 
       // D. Si exige comprobante, mandamos a la cola para Factura/Boleta
       if (requiresSunat) {
