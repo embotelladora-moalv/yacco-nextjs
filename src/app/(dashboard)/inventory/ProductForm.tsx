@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   productSchema,
   ProductFormValues,
 } from "@/core/validations/inventorySchemas";
 import { saveProductAction } from "./actions";
+import { PRICE_STEP } from "@/core/utils/priceConfig";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -19,7 +20,7 @@ import { PackagePlus, Save, Info, Factory, Tag } from "lucide-react";
 interface ProductFormProps {
   packagingTypes: string[];
   maquilaBrands: string[]; // <-- Opción A: Viene de systemSettings
-  initialData?: any;
+  initialData?: (Partial<ProductFormValues> & { id?: string }) | null;
 }
 
 export function ProductForm({
@@ -31,8 +32,8 @@ export function ProductForm({
   const router = useRouter();
 
   const form = useForm<ProductFormValues>({
-    resolver: zodResolver(productSchema) as any,
-    defaultValues: initialData || {
+    resolver: zodResolver(productSchema) as unknown as Resolver<ProductFormValues>,
+    defaultValues: (initialData ?? undefined) as unknown as ProductFormValues || {
       name: "",
       sku: "",
       operationalCategory: "FULL_PRODUCT",
@@ -275,7 +276,7 @@ export function ProductForm({
                 <Input
                   {...form.register("priceRefill")}
                   type="number"
-                  step="0.1"
+                  step={PRICE_STEP}
                   className="h-12 text-lg font-black border-blue-200"
                 />
               </div>
@@ -285,7 +286,7 @@ export function ProductForm({
               <Input
                 {...form.register("priceFull")}
                 type="number"
-                step="0.1"
+                step={PRICE_STEP}
                 className="h-12 text-lg font-black border-emerald-200"
               />
             </div>
@@ -297,7 +298,7 @@ export function ProductForm({
                 <Input
                   {...form.register("priceEmpty")}
                   type="number"
-                  step="0.1"
+                  step={PRICE_STEP}
                   className="h-12 text-lg font-black border-orange-200"
                 />
               </div>

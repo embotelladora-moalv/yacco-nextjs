@@ -133,6 +133,7 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 - **Trazabilidad de lote FEFO híbrido COMPLETA**: Soporte en planta + ruta + maquila. Vencimiento del lote por defecto a +6 meses (editable), y visualización en `/inventory/report/lots`. Reconciliación: 0 descuadres (descuento atómico en la misma transacción).
 - **Fix de serialización de Timestamp (BUG-12)**: Resuelto en `sales/new`, pit-stop y `collections/pay`.
 - **Refactorización de botones de producción**: Se agruparon las acciones y modales del panel de inventario y producción dentro de un menú unificado ("Acciones de Planta") controlado por estados para mejorar la UX y limpiar la interfaz.
+- **Tarifas y Tipo de Venta en Pedidos**: Se agregaron el tipo de venta por línea (`itemSaleType`) y la descripción a los pedidos (`orderItemSchema` y entidad `OrderItem`). Se implementó reactividad de precios y tarifas personalizadas por cliente en el formulario de pedidos (`OrderForm.tsx`) replicando la lógica en memoria de `SaleForm.tsx`.
 
 ### Pendientes siguientes
 

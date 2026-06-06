@@ -9,6 +9,7 @@ import {
   CustomerFormValues,
 } from "@/core/validations/crmSchemas";
 import { saveCustomerAction } from "./actions";
+import { PRICE_STEP } from "@/core/utils/priceConfig";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -503,7 +504,7 @@ export function CustomerForm({ initialData, products }: CustomerFormProps) {
                       </span>
                       <Input
                         type="number"
-                        step="0.10"
+                        step={PRICE_STEP}
                         className="h-10 pl-8 font-bold text-right bg-white"
                         {...form.register(
                           `customPrices.${index}.refillPrice` as const,
@@ -523,7 +524,7 @@ export function CustomerForm({ initialData, products }: CustomerFormProps) {
                       </span>
                       <Input
                         type="number"
-                        step="0.10"
+                        step={PRICE_STEP}
                         className="h-10 pl-8 font-bold text-right bg-white"
                         {...form.register(
                           `customPrices.${index}.fullPrice` as const,
@@ -543,7 +544,7 @@ export function CustomerForm({ initialData, products }: CustomerFormProps) {
                       </span>
                       <Input
                         type="number"
-                        step="0.10"
+                        step={PRICE_STEP}
                         className="h-10 pl-8 font-bold text-right bg-white"
                         {...form.register(
                           `customPrices.${index}.bottlePrice` as const,
