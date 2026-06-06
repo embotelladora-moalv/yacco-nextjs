@@ -1,6 +1,6 @@
 "use client";
 
-import { Customer } from "@/core/entities/CRM";
+import { Customer, CustomerContainerLog, CustomerContainerBalance, CustomerLocation, ContainerLogDelta } from "@/core/entities/CRM";
 import { Product } from "@/core/entities/Inventory";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,15 +31,17 @@ export interface PendingSale {
 }
 
 interface CustomerProfileProps {
-  customer: any;
+  customer: Customer;
   products: Product[];
   pendingSales: PendingSale[]; // <-- NUEVA PROP
+  containerLogs?: (Omit<CustomerContainerLog, "createdAt"> & { createdAt: string | Date; userName: string })[]; // <-- NUEVA PROP
 }
 
 export function CustomerProfileClient({
   customer,
   products,
   pendingSales = [], // Por defecto vacío si no hay
+  containerLogs = [], // <-- NUEVA PROP
 }: CustomerProfileProps) {
   // Helper para obtener el nombre del producto
   const getProductName = (id: string) => {
@@ -47,21 +49,21 @@ export function CustomerProfileClient({
   };
 
   // Formatear fechas
-  const formatDate = (isoString?: string) => {
-    if (!isoString) return "Sin registros";
+  const formatDate = (isoStringOrDate?: string | Date | null) => {
+    if (!isoStringOrDate) return "Sin registros";
     return new Intl.DateTimeFormat("es-PE", {
       day: "2-digit",
       month: "short",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-    }).format(new Date(isoString));
+    }).format(new Date(isoStringOrDate));
   };
 
   const totalDebt = customer.debtAmount || 0;
   const totalContainersOwed =
     customer.containerBalances?.reduce(
-      (acc: number, curr: any) => acc + curr.balance,
+      (acc: number, curr: CustomerContainerBalance) => acc + curr.balance,
       0,
     ) || 0;
 
@@ -208,9 +210,10 @@ export function CustomerProfileClient({
       {/* OPERATIVA: ENVASES Y SEDES                                       */}
       {/* ---------------------------------------------------------------- */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* COLUMNA IZQUIERDA: DETALLE DE CUENTA CORRIENTE (ENVASES) */}
+        {/* COLUMNA IZQUIERDA: DETALLE DE CUENTA CORRIENTE (ENVASES) Y HISTORIAL */}
         <div className="space-y-6 lg:col-span-1">
-          <div className="bg-[#0f172a] rounded-[2rem] p-6 shadow-xl shadow-slate-900/10 text-white min-h-[300px] relative overflow-hidden">
+          {/* Tarjeta Envases Prestados */}
+          <div className="bg-[#0f172a] rounded-[2rem] p-6 shadow-xl shadow-slate-900/10 text-white relative overflow-hidden">
             {/* Decal de fondo */}
             <Package className="absolute -bottom-6 -right-6 w-40 h-40 text-white/5 rotate-12 pointer-events-none" />
 
@@ -228,7 +231,7 @@ export function CustomerProfileClient({
               </div>
             ) : (
               <div className="space-y-4">
-                {customer.containerBalances.map((balance: any) => (
+                {customer.containerBalances.map((balance: CustomerContainerBalance) => (
                   <div
                     key={balance.productId}
                     className="flex justify-between items-center border-b border-slate-700/50 pb-3"
@@ -256,6 +259,85 @@ export function CustomerProfileClient({
               </div>
             )}
           </div>
+
+          {/* Tarjeta Historial de Envases */}
+          <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm flex flex-col max-h-[500px]">
+            <h3 className="font-black text-slate-800 text-base flex items-center gap-2 mb-4">
+              <Calendar className="h-5 w-5 text-slate-400" /> Historial de Envases
+            </h3>
+
+            {!containerLogs || containerLogs.length === 0 ? (
+              <div className="text-center py-8 opacity-60 flex-1 flex flex-col items-center justify-center">
+                <Package className="h-8 w-8 text-slate-300 mb-2" />
+                <p className="text-xs text-slate-500 font-bold">Sin movimientos de envases registrados aún.</p>
+              </div>
+            ) : (
+              <div className="space-y-3 overflow-y-auto flex-1 pr-1 max-h-[380px] scrollbar-thin">
+                {containerLogs.map((log) => {
+                  const typeLabels: Record<string, string> = {
+                    SALE: "Venta",
+                    DELIVERY: "Entrega",
+                    ADJUSTMENT: "Ajuste manual",
+                    REVERSAL: "Anulación",
+                  };
+                  const typeLabel = typeLabels[log.type] || log.type;
+                  const isCorrection = log.type === "ADJUSTMENT" || log.type === "REVERSAL";
+
+                  return (
+                    <div
+                      key={log.id}
+                      className={`p-3 rounded-xl border text-xs transition-colors ${
+                        isCorrection
+                          ? "bg-amber-50/40 border-amber-100 hover:bg-amber-50/60"
+                          : "bg-slate-50/50 border-slate-100 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <span className={`font-black uppercase text-[9px] px-2 py-0.5 rounded-md ${
+                          log.type === "SALE" ? "bg-blue-50 text-blue-700 border border-blue-100" :
+                          log.type === "DELIVERY" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" :
+                          log.type === "REVERSAL" ? "bg-purple-50 text-purple-700 border border-purple-100" :
+                          "bg-orange-50 text-orange-700 border border-orange-100"
+                        }`}>
+                          {typeLabel}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-bold">
+                          {formatDate(log.createdAt)}
+                        </span>
+                      </div>
+
+                      {/* Deltas */}
+                      <div className="mt-2 space-y-1">
+                        {log.delta?.map((d: ContainerLogDelta) => {
+                          const isNegative = d.delta < 0;
+                          return (
+                            <div key={d.productId} className="flex justify-between items-center font-bold">
+                              <span className="text-slate-600 font-semibold">{getProductName(d.productId)}</span>
+                              <span className={isNegative ? "text-emerald-600" : "text-red-600"}>
+                                {isNegative ? "" : "+"}{d.delta} u.
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Reason */}
+                      {log.reason && (
+                        <p className="mt-2 text-[10px] text-slate-500 bg-white/60 border border-slate-100 p-1.5 rounded-md italic">
+                          Motivo: {log.reason}
+                        </p>
+                      )}
+
+                      {/* Auditoria */}
+                      <p className="mt-2 text-[9px] text-slate-400 font-bold text-right">
+                        Reg: <span className="text-slate-600">{log.userName}</span>
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* COLUMNA DERECHA: SEDES / UBICACIONES */}
@@ -266,7 +348,7 @@ export function CustomerProfileClient({
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {customer.locations?.map((loc: any, index: number) => (
+            {customer.locations?.map((loc: CustomerLocation, index: number) => (
               <div
                 key={loc.id || index}
                 className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group hover:border-blue-200 transition-colors"

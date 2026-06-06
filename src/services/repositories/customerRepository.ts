@@ -1,6 +1,6 @@
 import { adminDb } from "../firebase/admin";
 import admin from "firebase-admin";
-import { Customer } from "@/core/entities/CRM";
+import { Customer, CustomerContainerLog } from "@/core/entities/CRM";
 import { serializeFirestoreData } from "@/services/firebase/serialization";
 import { customerSearchService } from "../search/customerSearchService";
 import { paginate } from "./_pagination";
@@ -351,5 +351,27 @@ export const customerRepository = {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
+  },
+
+  /**
+   * Obtiene el historial de movimientos de envases de un cliente.
+   */
+  async getContainerLogsByCustomerId(
+    customerId: string,
+    max?: number
+  ): Promise<CustomerContainerLog[]> {
+    const snapshot = await adminDb
+      .collection("customerContainerLogs")
+      .where("customerId", "==", customerId)
+      .orderBy("createdAt", "desc")
+      .limit(max || 50)
+      .get();
+
+    return snapshot.docs.map((doc) =>
+      serializeFirestoreData({
+        id: doc.id,
+        ...doc.data(),
+      })
+    ) as CustomerContainerLog[];
   },
 };
