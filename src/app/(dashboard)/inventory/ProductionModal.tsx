@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   productionBatchSchema,
@@ -26,18 +26,28 @@ import {
   Calendar,
   PackagePlus,
   FileText,
-  Save,
   ShieldCheck,
   Factory as FactoryIcon,
 } from "lucide-react";
 
 interface ProductionModalProps {
   products: Product[];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  showTrigger?: boolean;
 }
 
-export function ProductionModal({ products }: ProductionModalProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export function ProductionModal({
+  products,
+  open,
+  onOpenChange,
+  showTrigger = true,
+}: ProductionModalProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
   const [isPending, setIsPending] = useState(false);
+
+  const isOpen = open !== undefined ? open : internalOpen;
+  const setIsOpen = onOpenChange !== undefined ? onOpenChange : setInternalOpen;
 
   // Solo productos que se pueden llenar (no accesorios) y que estén activos
   const producibleProducts = products.filter(
@@ -45,7 +55,7 @@ export function ProductionModal({ products }: ProductionModalProps) {
   );
 
   const form = useForm<ProductionBatchFormValues>({
-    resolver: zodResolver(productionBatchSchema) as any,
+    resolver: zodResolver(productionBatchSchema) as unknown as Resolver<ProductionBatchFormValues>,
     defaultValues: {
       productId: "",
       quantityProduced: 0,
@@ -105,12 +115,14 @@ export function ProductionModal({ products }: ProductionModalProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button className="bg-slate-900 hover:bg-slate-800 font-bold shadow-md  px-6 rounded-xl transition-all">
-          <Factory className="mr-2 h-4 w-4 text-orange-400" /> Declarar
-          Producción
-        </Button>
-      </DialogTrigger>
+      {showTrigger && (
+        <DialogTrigger asChild>
+          <Button className="bg-slate-900 hover:bg-slate-800 font-bold shadow-md  px-6 rounded-xl transition-all">
+            <Factory className="mr-2 h-4 w-4 text-orange-400" /> Declarar
+            Producción
+          </Button>
+        </DialogTrigger>
+      )}
 
       <DialogContent className="sm:max-w-xl bg-white rounded-[2.5rem] overflow-hidden border-0 p-0 shadow-2xl">
         <DialogHeader className="bg-slate-900 p-8 text-white">

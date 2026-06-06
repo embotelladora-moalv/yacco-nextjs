@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Resolver } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { registerPurchaseAction } from "./actions";
@@ -22,6 +22,9 @@ import { ArrowDownToLine, PackagePlus, Save } from "lucide-react";
 
 interface EmptyIntakeModalProps {
   products: Product[];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  showTrigger?: boolean;
 }
 
 // Un schema rápido solo para este modal
@@ -32,15 +35,23 @@ const intakeSchema = z.object({
 
 type IntakeFormValues = z.infer<typeof intakeSchema>;
 
-export function EmptyIntakeModal({ products }: EmptyIntakeModalProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export function EmptyIntakeModal({
+  products,
+  open,
+  onOpenChange,
+  showTrigger = true,
+}: EmptyIntakeModalProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
   const [isPending, setIsPending] = useState(false);
+
+  const isOpen = open !== undefined ? open : internalOpen;
+  const setIsOpen = onOpenChange !== undefined ? onOpenChange : setInternalOpen;
 
   // Solo podemos ingresar "vacíos" de productos que manejan envases retornables
   const returnableProducts = products.filter((p) => p.isReturnableContainer);
 
   const form = useForm<IntakeFormValues>({
-    resolver: zodResolver(intakeSchema) as any,
+    resolver: zodResolver(intakeSchema) as unknown as Resolver<IntakeFormValues>,
     defaultValues: {
       productId: "",
       quantity: 0,
@@ -66,15 +77,17 @@ export function EmptyIntakeModal({ products }: EmptyIntakeModalProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          className="font-bold border-slate-200 text-slate-700 shadow-sm hover:bg-green-50 hover:text-green-700 hover:border-green-200 transition-colors"
-        >
-          <ArrowDownToLine className="mr-2 h-4 w-4 text-green-600" /> Ingreso de
-          Vacíos
-        </Button>
-      </DialogTrigger>
+      {showTrigger && (
+        <DialogTrigger asChild>
+          <Button
+            variant="outline"
+            className="font-bold border-slate-200 text-slate-700 shadow-sm hover:bg-green-50 hover:text-green-700 hover:border-green-200 transition-colors"
+          >
+            <ArrowDownToLine className="mr-2 h-4 w-4 text-green-600" /> Ingreso de
+            Vacíos
+          </Button>
+        </DialogTrigger>
+      )}
 
       <DialogContent className="sm:max-w-md bg-white rounded-3xl overflow-hidden border-0 p-0">
         <DialogHeader className="bg-slate-50 p-6 border-b border-slate-100">

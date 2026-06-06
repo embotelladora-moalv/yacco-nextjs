@@ -13,6 +13,7 @@ import {
   MoreVertical,
   Trash2,
   History,
+  ChevronDown,
 } from "lucide-react";
 import Link from "next/link";
 import { ProductionModal } from "./ProductionModal";
@@ -23,16 +24,15 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { toggleProductStatusAction } from "./actions";
 
-interface InventoryDashboardProps {
-  products: Product[];
-}
-
-export function InventoryDashboard({ products }: InventoryDashboardProps) {
+export function InventoryDashboard({ products }: { products: Product[] }) {
   const [showOnlyActive, setShowOnlyActive] = useState(true);
+  const [isProductionOpen, setIsProductionOpen] = useState(false);
+  const [isIntakeOpen, setIsIntakeOpen] = useState(false);
 
   const filteredProducts = showOnlyActive
     ? products.filter((product) => product.isActive)
@@ -53,46 +53,85 @@ export function InventoryDashboard({ products }: InventoryDashboardProps) {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {/* Modal para Ingresar Envases Nuevos (Compras) */}
-          <EmptyIntakeModal products={products} />
+          {/* Modales Controlados (ocultamos sus triggers y los manejamos desde el Dropdown) */}
+          <ProductionModal
+            products={products}
+            open={isProductionOpen}
+            onOpenChange={setIsProductionOpen}
+            showTrigger={false}
+          />
+          <EmptyIntakeModal
+            products={products}
+            open={isIntakeOpen}
+            onOpenChange={setIsIntakeOpen}
+            showTrigger={false}
+          />
 
-          {/* Modal para Producción del Día */}
-          <ProductionModal products={products} />
+          {/* Menú de Opciones de Producción / Planta */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                className="bg-slate-900 hover:bg-slate-800 text-white font-black shadow-lg shadow-slate-900/20 rounded-xl px-5 h-11 transition-all gap-2"
+                id="btn-production-menu"
+              >
+                <Factory className="h-4 w-4 text-orange-400" />
+                Acciones de Planta
+                <ChevronDown className="h-4 w-4 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-56 font-bold rounded-xl p-1.5 bg-white border border-slate-200 shadow-xl"
+            >
+              <DropdownMenuItem
+                onClick={() => setIsProductionOpen(true)}
+                className="cursor-pointer flex items-center gap-2 p-2.5 rounded-lg hover:bg-slate-50 text-slate-800 hover:text-slate-900 transition-colors"
+              >
+                <Factory className="h-4 w-4 text-orange-500" />
+                Declarar Producción
+              </DropdownMenuItem>
 
-          {/* Botón para Ver Informe de Planta */}
-          <Button
-            asChild
-            variant="outline"
-            className="border-slate-200 hover:bg-slate-50 font-bold"
-            id="btn-view-report"
-          >
-            <Link href="/inventory/report">
-              <Package className="mr-2 h-4 w-4 text-blue-600" /> Informe de Planta
-            </Link>
-          </Button>
+              <DropdownMenuItem
+                onClick={() => setIsIntakeOpen(true)}
+                className="cursor-pointer flex items-center gap-2 p-2.5 rounded-lg hover:bg-slate-50 text-slate-800 hover:text-slate-900 transition-colors"
+              >
+                <ArrowDownToLine className="h-4 w-4 text-green-500" />
+                Ingresar Vacíos
+              </DropdownMenuItem>
 
-          {/* Botón para Ver Stock por Lote */}
-          <Button
-            asChild
-            variant="outline"
-            className="border-purple-200 hover:bg-purple-50 font-bold text-purple-700"
-            id="btn-view-lot-report"
-          >
-            <Link href="/inventory/report/lots">
-              <History className="mr-2 h-4 w-4 text-purple-600" /> Stock por Lote
-            </Link>
-          </Button>
+              <DropdownMenuItem asChild>
+                <Link
+                  href="/inventory/new"
+                  className="cursor-pointer flex items-center gap-2 p-2.5 rounded-lg hover:bg-slate-50 text-slate-800 hover:text-slate-900 transition-colors"
+                >
+                  <Plus className="h-4 w-4 text-blue-500" />
+                  Nuevo Producto
+                </Link>
+              </DropdownMenuItem>
 
-          {/* Botón para Crear Nuevo Producto en Catálogo */}
-          <Button
-            asChild
-            className="bg-blue-700 hover:bg-blue-800 font-black shadow-lg shadow-blue-600/20"
-            id="btn-create-product"
-          >
-            <Link href="/inventory/new">
-              <Plus className="mr-2 h-4 w-4" /> Nuevo Producto
-            </Link>
-          </Button>
+              <DropdownMenuSeparator className="my-1.5 border-t border-slate-100" />
+
+              <DropdownMenuItem asChild>
+                <Link
+                  href="/inventory/report"
+                  className="cursor-pointer flex items-center gap-2 p-2.5 rounded-lg hover:bg-slate-50 text-slate-800 hover:text-slate-900 transition-colors"
+                >
+                  <Package className="h-4 w-4 text-blue-600" />
+                  Informe de Planta
+                </Link>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem asChild>
+                <Link
+                  href="/inventory/report/lots"
+                  className="cursor-pointer flex items-center gap-2 p-2.5 rounded-lg hover:bg-slate-50 text-purple-700 hover:text-purple-800 transition-colors"
+                >
+                  <History className="h-4 w-4 text-purple-600" />
+                  Stock por Lote
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
