@@ -148,8 +148,8 @@ describe("Anulación de Ventas - Lógica Pura de Reversa", () => {
   describe("D. reverseManifestItems", () => {
     it("debe restar quantitySold del lote exacto de un manifiesto", () => {
       const manifestItems: DispatchItem[] = [
-        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 5, wasteQuantity: 0 },
-        { productId: "prodA", lotNumber: "L2", quantityLoaded: 10, quantitySold: 3, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 5, quantityReturnedFull: 0, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L2", quantityLoaded: 10, quantitySold: 3, quantityReturnedFull: 0, wasteQuantity: 0 },
       ];
       const saleItems: SaleItem[] = [
         { productId: "prodA", quantity: 3, unitPrice: 10, subtotal: 30, lotNumber: "L1" },
@@ -158,15 +158,15 @@ describe("Anulación de Ventas - Lógica Pura de Reversa", () => {
       const result = reverseManifestItems(manifestItems, saleItems);
 
       expect(result).toEqual([
-        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 2, wasteQuantity: 0 },
-        { productId: "prodA", lotNumber: "L2", quantityLoaded: 10, quantitySold: 3, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 2, quantityReturnedFull: 0, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L2", quantityLoaded: 10, quantitySold: 3, quantityReturnedFull: 0, wasteQuantity: 0 },
       ]);
     });
 
     it("debe restar correctamente cuando la venta está dividida en múltiples lotes", () => {
       const manifestItems: DispatchItem[] = [
-        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 5, wasteQuantity: 0 },
-        { productId: "prodA", lotNumber: "L2", quantityLoaded: 10, quantitySold: 5, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 5, quantityReturnedFull: 0, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L2", quantityLoaded: 10, quantitySold: 5, quantityReturnedFull: 0, wasteQuantity: 0 },
       ];
       const saleItems: SaleItem[] = [
         { productId: "prodA", quantity: 2, unitPrice: 10, subtotal: 20, lotNumber: "L1" },
@@ -176,14 +176,14 @@ describe("Anulación de Ventas - Lógica Pura de Reversa", () => {
       const result = reverseManifestItems(manifestItems, saleItems);
 
       expect(result).toEqual([
-        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 3, wasteQuantity: 0 },
-        { productId: "prodA", lotNumber: "L2", quantityLoaded: 10, quantitySold: 2, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 3, quantityReturnedFull: 0, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L2", quantityLoaded: 10, quantitySold: 2, quantityReturnedFull: 0, wasteQuantity: 0 },
       ]);
     });
 
     it("no debe disminuir quantitySold por debajo de 0", () => {
       const manifestItems: DispatchItem[] = [
-        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 2, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 2, quantityReturnedFull: 0, wasteQuantity: 0 },
       ];
       const saleItems: SaleItem[] = [
         { productId: "prodA", quantity: 5, unitPrice: 10, subtotal: 50, lotNumber: "L1" },
@@ -195,7 +195,7 @@ describe("Anulación de Ventas - Lógica Pura de Reversa", () => {
 
     it("no debe mutar el array de entrada original (inmutabilidad)", () => {
       const manifestItems: DispatchItem[] = [
-        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 5, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 5, quantityReturnedFull: 0, wasteQuantity: 0 },
       ];
       const saleItems: SaleItem[] = [
         { productId: "prodA", quantity: 3, unitPrice: 10, subtotal: 30, lotNumber: "L1" },
@@ -211,7 +211,7 @@ describe("Anulación de Ventas - Lógica Pura de Reversa", () => {
 
     it("debe ignorar items de venta que no coincidan en el manifiesto sin arrojar error", () => {
       const manifestItems: DispatchItem[] = [
-        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 5, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 5, quantityReturnedFull: 0, wasteQuantity: 0 },
       ];
       const saleItems: SaleItem[] = [
         { productId: "prodB", quantity: 3, unitPrice: 10, subtotal: 30, lotNumber: "L2" },
@@ -219,7 +219,7 @@ describe("Anulación de Ventas - Lógica Pura de Reversa", () => {
 
       const result = reverseManifestItems(manifestItems, saleItems);
       expect(result).toEqual([
-        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 5, wasteQuantity: 0 },
+        { productId: "prodA", lotNumber: "L1", quantityLoaded: 10, quantitySold: 5, quantityReturnedFull: 0, wasteQuantity: 0 },
       ]);
     });
   });
