@@ -8,15 +8,21 @@ import { revalidatePath } from "next/cache";
 import { adminAuth } from "@/services/firebase/admin";
 import { salesRepository } from "@/services/repositories/salesRepository";
 import { cookies } from "next/headers";
+import { getUserSession } from "@/services/firebase/auth";
 
 export async function registerPaymentAction(data: PaymentFormValues) {
   try {
+    const session = await getUserSession();
+    if (!session) {
+      return { success: false, error: "Sesión inválida. Vuelva a iniciar sesión." };
+    }
+
     const parsedData = paymentSchema.parse(data);
 
-    // Aquí usarías el ID de la sesión real. Lo hardcodeamos por ahora.
-    const userId = "ADMIN_SYS";
-
-    await salesRepository.registerPayment(parsedData);
+    await salesRepository.registerPayment({
+      ...parsedData,
+      receivedById: session.uid,
+    });
 
     // Refrescamos clientes y pedidos porque sus estados financieros cambiaron
     revalidatePath("/customers");
@@ -24,10 +30,11 @@ export async function registerPaymentAction(data: PaymentFormValues) {
     revalidatePath("/collections");
 
     return { success: true };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : "Error al registrar el pago.";
     return {
       success: false,
-      error: error.message || "Error al registrar el pago.",
+      error: errorMsg,
     };
   }
 }
