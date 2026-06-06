@@ -565,7 +565,7 @@ export function PitStopClient({ manifest, products, users, sales }: Props) {
             <div className="bg-slate-50 border border-slate-200 shadow-inner p-5 rounded-2xl space-y-4">
               <div className="flex justify-between items-center border-b border-slate-200 pb-2">
                 <Label className="font-black text-slate-800 text-xs uppercase tracking-wider">
-                  Llenos Devueltos (Mermas)
+                  Llenos Devueltos (Reingresan a Stock)
                 </Label>
                 <Button
                   type="button"

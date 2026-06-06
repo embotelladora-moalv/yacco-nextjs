@@ -7,11 +7,15 @@ import Link from "next/link";
 interface ActiveRoutesCardsProps {
   activeRoutes: any[];
   users: any[];
+  activeSales: any[];
+  products: any[];
 }
 
 export function ActiveRoutesCards({
   activeRoutes,
   users,
+  activeSales,
+  products,
 }: ActiveRoutesCardsProps) {
   const getDriverName = (id: string) => {
     if (!id) return "Sin Chofer Asignado";
@@ -49,15 +53,45 @@ export function ActiveRoutesCards({
             (acc: number, item: any) => acc + (item.quantityLoaded || 0),
             0,
           ) || 0;
-        const totalDelivered =
-          dispatch.items?.reduce(
-            (acc: number, item: any) => acc + (item.quantitySold || 0),
-            0,
-          ) || 0;
+        const manifestSales = activeSales.filter((s: any) => s.manifestId === dispatch.id);
+        const totalSold = manifestSales.reduce(
+          (sum: number, sale: any) =>
+            sum +
+            (sale.items || []).reduce(
+              (acc: number, item: any) =>
+                item.itemSaleType !== "BOTTLE" ? acc + (item.quantity || 0) : acc,
+              0,
+            ),
+          0,
+        );
         const progressPercentage =
           totalLoaded > 0
-            ? Math.round((totalDelivered / totalLoaded) * 100)
+            ? Math.round((totalSold / totalLoaded) * 100)
             : 0;
+
+        // Calcular unidades a bordo reales (replicando la fórmula de DispatchDetailsClient)
+        const fullsOnBoard: Record<string, number> = {};
+        (dispatch.items || []).forEach((item: any) => {
+          if (!fullsOnBoard[item.productId]) fullsOnBoard[item.productId] = 0;
+          fullsOnBoard[item.productId] +=
+            (item.quantityLoaded || 0) -
+            (item.quantityReturnedFull || 0) -
+            (item.wasteQuantity || 0);
+        });
+        manifestSales.forEach((sale: any) => {
+          (sale.items || []).forEach((item: any) => {
+            if (item.itemSaleType !== "BOTTLE" && fullsOnBoard[item.productId] !== undefined) {
+              fullsOnBoard[item.productId] -= item.quantity;
+            }
+          });
+        });
+        const totalOnBoard = Math.max(
+          0,
+          Object.values(fullsOnBoard).reduce(
+            (sum: number, val: number) => sum + Math.max(0, val),
+            0,
+          )
+        );
 
         return (
           <div
@@ -105,7 +139,7 @@ export function ActiveRoutesCards({
                   </span>
                 </div>
                 <p className="text-xl font-black text-slate-800">
-                  {totalDelivered} / {totalLoaded}{" "}
+                  {totalSold} / {totalLoaded}{" "}
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-normal">
                     unidades vendidas
                   </span>
@@ -115,6 +149,15 @@ export function ActiveRoutesCards({
                     className="bg-blue-600 h-full transition-all duration-500 shadow-[0_0_8px_rgba(37,99,235,0.3)]"
                     style={{ width: `${progressPercentage}%` }}
                   />
+                </div>
+
+                <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-200/60">
+                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">
+                    Stock Remanente
+                  </span>
+                  <span className="text-xs font-black text-orange-700 bg-orange-100 px-2 py-0.5 rounded">
+                    {totalOnBoard} a bordo
+                  </span>
                 </div>
               </div>
             </div>
