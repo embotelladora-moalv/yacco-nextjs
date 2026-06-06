@@ -1,4 +1,5 @@
 import { inventoryRepository } from "@/services/repositories/inventoryRepository";
+import { customerRepository } from "@/services/repositories/customerRepository";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import {
@@ -6,7 +7,6 @@ import {
   Factory,
   Package,
   CheckCircle2,
-  AlertCircle,
   HelpCircle,
   BarChart3,
   Droplets,
@@ -16,7 +16,10 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function PlantContainerReportPage() {
-  const products = await inventoryRepository.getAllProducts();
+  const [products, customers] = await Promise.all([
+    inventoryRepository.getAllProducts(),
+    customerRepository.getAllCustomers(),
+  ]);
 
   // Filter for containers/bidones
   const bidones = products.filter(
@@ -63,6 +66,82 @@ export default async function PlantContainerReportPage() {
     0
   );
 
+  // Calcular agregados de envases en clientes
+  let totalEnCirculacion = 0;
+  const productCirculationMap = new Map<string, number>();
+
+  interface Debtor {
+    id: string;
+    name: string;
+    alias?: string;
+    totalOwed: number;
+    balances: { productId: string; name: string; balance: number }[];
+  }
+
+  const debtorsList: Debtor[] = [];
+  const surplusCustomers: { id: string; name: string; totalSurplus: number }[] = [];
+
+  for (const customer of customers) {
+    let customerTotalOwed = 0;
+    let customerTotalSurplus = 0;
+    const activeBalances: { productId: string; name: string; balance: number }[] = [];
+
+    if (customer.containerBalances) {
+      for (const bal of customer.containerBalances) {
+        if (bal.balance > 0) {
+          customerTotalOwed += bal.balance;
+          const pName = products.find((p) => p.id === bal.productId)?.name || "Producto Desconocido";
+          activeBalances.push({
+            productId: bal.productId,
+            name: pName,
+            balance: bal.balance,
+          });
+
+          // Acumulado por producto
+          const currentProdTotal = productCirculationMap.get(bal.productId) || 0;
+          productCirculationMap.set(bal.productId, currentProdTotal + bal.balance);
+        } else if (bal.balance < 0) {
+          customerTotalSurplus += Math.abs(bal.balance);
+        }
+      }
+    }
+
+    if (customerTotalOwed > 0) {
+      debtorsList.push({
+        id: customer.id,
+        name: customer.name,
+        alias: customer.alias,
+        totalOwed: customerTotalOwed,
+        balances: activeBalances,
+      });
+      totalEnCirculacion += customerTotalOwed;
+    }
+
+    if (customerTotalSurplus > 0) {
+      surplusCustomers.push({
+        id: customer.id,
+        name: customer.name,
+        totalSurplus: customerTotalSurplus,
+      });
+    }
+  }
+
+  // Ordenar deudores de mayor a menor deuda
+  debtorsList.sort((a, b) => b.totalOwed - a.totalOwed);
+  const topDebtors = debtorsList.slice(0, 10);
+
+  // Convertir mapa de circulación a una lista con nombres
+  const circulationByProduct = Array.from(productCirculationMap.entries()).map(([productId, totalCirculation]) => {
+    const prod = products.find((p) => p.id === productId);
+    return {
+      productId,
+      sku: prod?.sku || "N/A",
+      name: prod?.name || "Producto Desconocido",
+      hasTap: prod?.hasTap,
+      totalCirculation,
+    };
+  });
+
   return (
     <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4 sm:px-6 space-y-8">
       {/* HEADER PRINCIPAL */}
@@ -87,10 +166,10 @@ export default async function PlantContainerReportPage() {
           </div>
           <div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-              Informe de Envases en Planta
+              Informe de Envases
             </h1>
             <p className="text-sm font-bold text-blue-600 mt-0.5 uppercase tracking-tight flex items-center gap-1.5">
-              <Factory className="h-3.5 w-3.5" /> Estado situacional y control físico
+              <Factory className="h-3.5 w-3.5" /> Estado situacional y control físico (Planta y Clientes)
             </p>
           </div>
         </div>
@@ -105,71 +184,76 @@ export default async function PlantContainerReportPage() {
         </Button>
       </div>
 
-      {/* TARJETAS DE INDICADORES PRINCIPALES */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Tarjeta 1: Total Llenos */}
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group hover:border-blue-200 transition-colors">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="h-10 w-10 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-100">
-              <Droplets className="h-5 w-5 text-emerald-600" />
+      {/* TARJETAS DE INDICADORES PRINCIPALES - PLANTA */}
+      <div className="space-y-4">
+        <h2 className="text-base font-black text-slate-800 uppercase tracking-widest px-2">
+          Envases en Planta (Almacén)
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Tarjeta 1: Total Llenos */}
+          <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group hover:border-blue-200 transition-colors">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="h-10 w-10 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-100">
+                <Droplets className="h-5 w-5 text-emerald-600" />
+              </div>
+              <h3 className="font-black text-slate-600 text-xs uppercase tracking-wider">
+                Bidones Llenos (Listos)
+              </h3>
             </div>
-            <h3 className="font-black text-slate-600 text-xs uppercase tracking-wider">
-              Bidones Llenos (Listos)
-            </h3>
+            <p className="text-4xl font-black text-slate-900 mt-2">
+              {totalLlenos}{" "}
+              <span className="text-sm font-bold text-slate-400">unidades</span>
+            </p>
+            <p className="text-[11px] font-bold text-emerald-600 mt-2 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Listos para despacho
+            </p>
           </div>
-          <p className="text-4xl font-black text-slate-900 mt-2">
-            {totalLlenos}{" "}
-            <span className="text-sm font-bold text-slate-400">unidades</span>
-          </p>
-          <p className="text-[11px] font-bold text-emerald-600 mt-2 flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Listos para despacho
-          </p>
-        </div>
 
-        {/* Tarjeta 2: Total Vacíos */}
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group hover:border-blue-200 transition-colors">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="h-10 w-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100">
-              <PackageOpen className="h-5 w-5 text-blue-600" />
+          {/* Tarjeta 2: Total Vacíos */}
+          <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group hover:border-blue-200 transition-colors">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="h-10 w-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100">
+                <PackageOpen className="h-5 w-5 text-blue-600" />
+              </div>
+              <h3 className="font-black text-slate-600 text-xs uppercase tracking-wider">
+                Bidones Vacíos (Retorno)
+              </h3>
             </div>
-            <h3 className="font-black text-slate-600 text-xs uppercase tracking-wider">
-              Bidones Vacíos (Retorno)
-            </h3>
+            <p className="text-4xl font-black text-slate-900 mt-2">
+              {totalVacios}{" "}
+              <span className="text-sm font-bold text-slate-400">unidades</span>
+            </p>
+            <p className="text-[11px] font-bold text-blue-600 mt-2 flex items-center gap-1">
+              <Factory className="w-3.5 h-3.5" /> Disponibles para producción
+            </p>
           </div>
-          <p className="text-4xl font-black text-slate-900 mt-2">
-            {totalVacios}{" "}
-            <span className="text-sm font-bold text-slate-400">unidades</span>
-          </p>
-          <p className="text-[11px] font-bold text-blue-600 mt-2 flex items-center gap-1">
-            <Factory className="w-3.5 h-3.5" /> Disponibles para producción
-          </p>
-        </div>
 
-        {/* Tarjeta 3: Total Stock */}
-        <div className="bg-slate-900 p-6 rounded-[2rem] shadow-xl text-white relative overflow-hidden">
-          <Package className="absolute -bottom-6 -right-6 w-32 h-32 text-white/5 rotate-12 pointer-events-none" />
-          <div className="flex items-center gap-3 mb-2">
-            <div className="h-10 w-10 rounded-xl bg-white/10 flex items-center justify-center border border-white/20">
-              <Package className="h-5 w-5 text-blue-400" />
+          {/* Tarjeta 3: Total Stock */}
+          <div className="bg-slate-900 p-6 rounded-[2rem] shadow-xl text-white relative overflow-hidden">
+            <Package className="absolute -bottom-6 -right-6 w-32 h-32 text-white/5 rotate-12 pointer-events-none" />
+            <div className="flex items-center gap-3 mb-2">
+              <div className="h-10 w-10 rounded-xl bg-white/10 flex items-center justify-center border border-white/20">
+                <Package className="h-5 w-5 text-blue-400" />
+              </div>
+              <h3 className="font-black text-slate-300 text-xs uppercase tracking-wider">
+                Total Envases en Planta
+              </h3>
             </div>
-            <h3 className="font-black text-slate-300 text-xs uppercase tracking-wider">
-              Total Envases en Planta
-            </h3>
+            <p className="text-4xl font-black text-white mt-2">
+              {totalStock}{" "}
+              <span className="text-sm font-bold text-slate-500">unidades</span>
+            </p>
+            <p className="text-[11px] font-bold text-slate-400 mt-2">
+              Suma de llenos y vacíos en almacén
+            </p>
           </div>
-          <p className="text-4xl font-black text-white mt-2">
-            {totalStock}{" "}
-            <span className="text-sm font-bold text-slate-500">unidades</span>
-          </p>
-          <p className="text-[11px] font-bold text-slate-400 mt-2">
-            Suma de llenos y vacíos en almacén
-          </p>
         </div>
       </div>
 
       {/* DESGLOSE POR TIPO DE CAÑO */}
       <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm space-y-6">
         <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-          <BarChart3 className="h-5 w-5 text-slate-400" /> Desglose Técnico de Envases
+          <BarChart3 className="h-5 w-5 text-slate-400" /> Desglose Técnico de Envases en Planta
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -245,7 +329,7 @@ export default async function PlantContainerReportPage() {
       <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
           <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-            <Package className="h-5 w-5 text-slate-400" /> Detalle por Producto
+            <Package className="h-5 w-5 text-slate-400" /> Detalle por Producto en Planta
           </h2>
           <span className="text-xs font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1.5 rounded-xl">
             {bidones.length} Productos
@@ -324,17 +408,172 @@ export default async function PlantContainerReportPage() {
         </div>
       </div>
 
-      {/* NOTA DE COLA DE CLIENTES Y OBSERVACIONES */}
-      <div className="bg-blue-50/50 border border-blue-100 rounded-[2rem] p-6 flex gap-4 items-start">
-        <AlertCircle className="h-6 w-6 text-blue-600 shrink-0 mt-0.5" />
-        <div>
-          <h4 className="font-black text-blue-900 text-sm">
-            Control de Envases en Clientes
-          </h4>
-          <p className="text-xs text-blue-700 font-medium mt-1 leading-relaxed">
-            ⚠️ <strong>Bidones en clientes: pendiente</strong> (se acumula con la operación, actualmente se encuentra en 0 tras el reinicio general de balances contables).
-          </p>
-        </div>
+      <hr className="border-slate-200/60" />
+
+      {/* SECCIÓN CONTROL DE ENVASES EN CLIENTES */}
+      <div className="space-y-6">
+        <h2 className="text-base font-black text-slate-800 uppercase tracking-widest px-2">
+          Control de Envases en Clientes (Circulación)
+        </h2>
+
+        {totalEnCirculacion === 0 ? (
+          <div className="bg-white rounded-[2rem] p-10 border border-slate-200 shadow-sm text-center space-y-4">
+            <div className="h-16 w-16 mx-auto rounded-full bg-blue-50 flex items-center justify-center border border-blue-100">
+              <Package className="h-8 w-8 text-blue-500" />
+            </div>
+            <div className="max-w-md mx-auto">
+              <h3 className="text-lg font-black text-slate-800">Sin envases en circulación</h3>
+              <p className="text-xs text-slate-500 font-bold mt-2 leading-relaxed">
+                Aún no hay envases en circulación registrados en la cuenta corriente de los clientes. Se acumularán con la operación comercial o ajustes manuales de saldos.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* KPI Cards de Clientes & Cuadre */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Tarjeta En Circulación */}
+              <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm hover:border-blue-200 transition-colors">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="h-10 w-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100">
+                    <Package className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <h3 className="font-black text-slate-600 text-xs uppercase tracking-wider">
+                    Envases en Circulación (Clientes)
+                  </h3>
+                </div>
+                <p className="text-4xl font-black text-slate-900 mt-2">
+                  {totalEnCirculacion}{" "}
+                  <span className="text-sm font-bold text-slate-400">unidades</span>
+                </p>
+                <p className="text-[11px] font-bold text-blue-600 mt-2">
+                  Total prestado acumulado en todos los clientes
+                </p>
+              </div>
+
+              {/* Tarjeta Cuadre Global */}
+              <div className="bg-slate-900 p-6 rounded-[2rem] shadow-xl text-white relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-xl pointer-events-none"></div>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="h-10 w-10 rounded-xl bg-white/10 flex items-center justify-center border border-white/20">
+                    <BarChart3 className="h-5 w-5 text-blue-400" />
+                  </div>
+                  <h3 className="font-black text-slate-300 text-xs uppercase tracking-wider">
+                    Suma Total en Movimiento
+                  </h3>
+                </div>
+                <p className="text-4xl font-black text-white mt-2">
+                  {totalStock + totalEnCirculacion}{" "}
+                  <span className="text-sm font-bold text-slate-500">unidades</span>
+                </p>
+                <p className="text-[11px] font-bold text-slate-400 mt-2 leading-relaxed">
+                  En planta: <strong className="text-white">{totalStock}</strong> + En clientes: <strong className="text-white">{totalEnCirculacion}</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Tabla Desglose por Producto */}
+              <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                  <h3 className="font-black text-sm text-slate-800 uppercase tracking-wider">
+                    Desglose en Clientes por Producto
+                  </h3>
+                </div>
+                <div className="overflow-x-auto flex-1">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/20">
+                        <th className="px-5 py-3">SKU</th>
+                        <th className="px-5 py-3">Nombre</th>
+                        <th className="px-5 py-3 text-right">En Clientes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+                      {circulationByProduct.map((item) => (
+                        <tr key={item.productId} className="hover:bg-slate-50/30">
+                          <td className="px-5 py-3 font-black text-slate-900 tracking-wide uppercase">
+                            {item.sku}
+                          </td>
+                          <td className="px-5 py-3 text-slate-800">{item.name}</td>
+                          <td className="px-5 py-3 text-right font-black text-blue-600">
+                            {item.totalCirculation}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Ranking de Deudores */}
+              <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                  <h3 className="font-black text-sm text-slate-800 uppercase tracking-wider">
+                    Top 10 Clientes con más Envases
+                  </h3>
+                </div>
+                <div className="overflow-x-auto flex-1">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/20">
+                        <th className="px-5 py-3">Cliente</th>
+                        <th className="px-5 py-3 text-right">Envases prestados</th>
+                        <th className="px-5 py-3 text-center">Ficha</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+                      {topDebtors.map((debtor) => (
+                        <tr key={debtor.id} className="hover:bg-slate-50/30">
+                          <td className="px-5 py-3">
+                            <p className="font-black text-slate-900">{debtor.name}</p>
+                            {debtor.alias && (
+                              <p className="text-[10px] text-slate-400 font-bold">{debtor.alias}</p>
+                            )}
+                          </td>
+                          <td className="px-5 py-3 text-right font-black text-red-600">
+                            {debtor.totalOwed}
+                          </td>
+                          <td className="px-5 py-3 text-center">
+                            <Link
+                              href={`/customers/${debtor.id}`}
+                              className="inline-flex items-center justify-center font-bold text-[10px] text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              Ver Ficha
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Clientes con saldo a favor */}
+            {surplusCustomers.length > 0 && (
+              <div className="bg-emerald-50/50 border border-emerald-100 rounded-[2rem] p-6">
+                <h4 className="font-black text-emerald-900 text-sm">
+                  Clientes con Devoluciones Excedentes (Saldo a Favor)
+                </h4>
+                <p className="text-xs text-emerald-700 font-medium mt-1 leading-relaxed">
+                  Hay {surplusCustomers.length} clientes que han devuelto más envases de los registrados en su poder:
+                </p>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {surplusCustomers.map((sc) => (
+                    <Link
+                      key={sc.id}
+                      href={`/customers/${sc.id}`}
+                      className="bg-white border border-emerald-200 text-emerald-800 text-[10px] font-black uppercase px-2.5 py-1 rounded-md shadow-sm hover:bg-emerald-50"
+                    >
+                      {sc.name} (-{sc.totalSurplus} u.)
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
