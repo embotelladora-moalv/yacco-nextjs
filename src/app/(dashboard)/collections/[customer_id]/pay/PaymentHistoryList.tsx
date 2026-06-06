@@ -29,11 +29,13 @@ export function PaymentHistoryList({ payments }: PaymentHistoryListProps) {
 
   const renderMethod = (method: string) => {
     const methods: Record<string, string> = {
-      TRANSFER: "Transferencia / Yape",
       CASH: "Efectivo",
+      TRANSFER: "Transferencia",
+      YAPE_PLIN: "Yape / Plin",
       CHECK: "Cheque",
+      OTHER: "Otro",
     };
-    return methods[method] || method;
+    return methods[method] || method || "Otro";
   };
 
   const handleCancelPayment = async (paymentId: string, customerId: string) => {

@@ -4,7 +4,7 @@ export const paymentBaseSchema = z.object({
   customerId: z.string().min(1, "El ID del cliente es obligatorio"),
   amount: z.number().min(0.1, "El monto debe ser mayor a 0"),
   date: z.string().min(1, "La fecha es obligatoria"),
-  paymentMethod: z.enum(["CASH", "TRANSFER", "CHECK", "OTHER"]),
+  paymentMethod: z.enum(["CASH", "TRANSFER", "YAPE_PLIN"]),
   bankId: z.string().optional().or(z.literal("")),
   bankName: z.string().optional().or(z.literal("")),
   reference: z.string().optional(),

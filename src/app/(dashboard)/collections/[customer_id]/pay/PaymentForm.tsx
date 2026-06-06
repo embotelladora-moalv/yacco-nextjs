@@ -73,7 +73,7 @@ export function PaymentForm({
       customerId: customer.id,
       amount: currentDebt, // Sugerimos pagar todo por defecto
       date: todayStr,
-      paymentMethod: "TRANSFER",
+      paymentMethod: "CASH",
       bankId: "",
       bankName: "",
       reference: "",
@@ -241,7 +241,7 @@ export function PaymentForm({
                 Pagar (S/) *
               </Label>
               <Input
-                {...form.register("amount")}
+                {...form.register("amount", { valueAsNumber: true })}
                 type="number"
                 step="0.10"
                 min="0.1"
@@ -274,10 +274,9 @@ export function PaymentForm({
                 {...form.register("paymentMethod")}
                 className="w-full h-12 px-4 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white"
               >
-                <option value="TRANSFER">Transferencia / Yape / Plin</option>
-                <option value="CASH">Efectivo Físico</option>
-                <option value="CHECK">Cheque</option>
-                <option value="OTHER">Otro</option>
+                <option value="CASH">Efectivo</option>
+                <option value="TRANSFER">Transferencia</option>
+                <option value="YAPE_PLIN">Yape / Plin</option>
               </select>
             </div>
 
