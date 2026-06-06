@@ -56,3 +56,6 @@ keys/
 liquidation-time-report.json
 /scripts/audit/*.json
 /scripts/cleanup/*.json
+
+# Firebase debug logs
+firebase-debug.log*
