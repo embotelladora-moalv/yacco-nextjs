@@ -122,3 +122,68 @@ export async function fetchPaginatedSalesAction(
     return { success: false, error: error.message };
   }
 }
+
+export async function cancelSaleAction(saleId: string, reason: string) {
+  try {
+    const session = await getUserSession();
+    if (!session) {
+      return { success: false, error: "Sesión inválida. Vuelva a iniciar sesión." };
+    }
+
+    if (!reason || !reason.trim()) {
+      return { success: false, error: "El motivo de la anulación es obligatorio." };
+    }
+
+    const saleDocRef = adminDb.collection("sales").doc(saleId);
+    const saleDoc = await saleDocRef.get();
+    if (!saleDoc.exists) {
+      return { success: false, error: "La venta no existe." };
+    }
+    const saleData = saleDoc.data() as any;
+
+    if (saleData.status === "CANCELLED") {
+      return { success: false, error: "Esta venta ya ha sido anulada previamente." };
+    }
+
+    if (saleData.isBilled === true || saleData.sunatDocumentId) {
+      return { success: false, error: "Venta facturada con SUNAT, anule primero el comprobante." };
+    }
+
+    const queueSnap = await adminDb.collection("sunatQueue")
+      .where("referenceId", "==", saleId)
+      .where("referenceType", "==", "SALE")
+      .get();
+    if (!queueSnap.empty) {
+      return { success: false, error: "Facturación en cola/proceso de envío a SUNAT." };
+    }
+
+    const paymentsSnap = await adminDb.collection("debtPayments")
+      .where("customerId", "==", saleData.customerId)
+      .where("status", "==", "ACTIVE")
+      .get();
+
+    const hasAppliedPayments = paymentsSnap.docs.some((doc) => {
+      const payment = doc.data();
+      return (payment.appliedTo || []).some((app: any) => app.saleId === saleId);
+    });
+
+    if (hasAppliedPayments) {
+      return { success: false, error: "La venta tiene pagos aplicados, anule primero los pagos." };
+    }
+
+    await salesRepository.cancelSale(saleId, session.uid, reason.trim());
+
+    revalidatePath("/sales");
+    if (saleData.linkedOrderId) {
+      revalidatePath("/orders");
+    }
+    if (saleData.manifestId && saleData.manifestId !== "PLANT_SALE") {
+      revalidatePath(`/dispatch/${saleData.manifestId}`);
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error al anular venta:", error);
+    return { success: false, error: error.message || "Error al anular la venta." };
+  }
+}

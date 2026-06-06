@@ -11,7 +11,7 @@ export interface ContainerLogBalance { productId: string; balance: number; }
 export interface CustomerContainerLog {
   id: string;
   customerId: string;
-  type: "SALE" | "DELIVERY" | "ADJUSTMENT";
+  type: "SALE" | "DELIVERY" | "ADJUSTMENT" | "REVERSAL";
   saleId?: string;
   manifestId?: string;
   delta: ContainerLogDelta[];          // cambio neto por producto (entregado - devuelto)
@@ -103,6 +103,9 @@ export interface Sale {
   sunatDocumentId?: string | null;
   date?: string;
   dateProcess?: string;
+  cancelledBy?: string;
+  cancelledAt?: Date;
+  cancellationReason?: string;
   createdAt: Date;
   updatedAt: Date;
 }

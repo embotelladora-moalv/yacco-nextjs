@@ -1,9 +1,8 @@
 import admin from "firebase-admin";
-import { Sale, Customer, CustomerContainerBalance } from "@/core/entities/CRM";
+import { Sale, Customer, CustomerContainerBalance, SaleItem } from "@/core/entities/CRM";
 import { DispatchManifest } from "@/core/entities/Dispatch";
 import { SaleFormValues } from "@/core/validations/crmSchemas";
 import { adminDb } from "@/services/firebase/admin";
-import { PaymentFormValues } from "@/core/validations/paymentSchema";
 import { serializeFirestoreData } from "@/services/firebase/serialization";
 import { paginate } from "./_pagination";
 
@@ -1030,5 +1029,310 @@ export const salesRepository = {
     }
 
     return allSales;
+  },
+
+  async cancelSale(
+    saleId: string,
+    cancelledByUid: string,
+    reason: string,
+  ): Promise<void> {
+    await adminDb.runTransaction(async (transaction) => {
+      const saleRef = adminDb.collection(SALES_COLLECTION).doc(saleId);
+      const saleDoc = await transaction.get(saleRef);
+
+      if (!saleDoc.exists) {
+        throw new Error("La venta no existe.");
+      }
+
+      interface DBRecordSale extends Sale {
+        linkedOrderId?: string;
+        guideDocumentId?: string | null;
+        billingSkipped?: boolean;
+      }
+
+      interface SaleItemWithSaleType extends SaleItem {
+        itemSaleType?: string;
+      }
+
+      const saleData = saleDoc.data() as DBRecordSale;
+
+      if (saleData.status === "CANCELLED") {
+        throw new Error("Esta venta ya ha sido anulada previamente.");
+      }
+
+      if (saleData.isBilled === true || saleData.sunatDocumentId) {
+        throw new Error("Venta facturada con SUNAT, anule primero el comprobante.");
+      }
+
+      const customerRef = adminDb.collection(CUSTOMERS_COLLECTION).doc(saleData.customerId);
+      const customerDoc = await transaction.get(customerRef);
+
+      if (!customerDoc.exists) {
+        throw new Error("El cliente asociado a esta venta no existe.");
+      }
+
+      const isPlant = saleData.manifestId === "PLANT_SALE";
+      let manifestDoc: admin.firestore.DocumentSnapshot | null = null;
+      let manifestRef: admin.firestore.DocumentReference | null = null;
+
+      if (!isPlant && saleData.manifestId) {
+        manifestRef = adminDb.collection(DISPATCH_COLLECTION).doc(saleData.manifestId);
+        manifestDoc = await transaction.get(manifestRef);
+        if (!manifestDoc.exists) {
+          throw new Error("El manifiesto de ruta no existe.");
+        }
+        const manifestData = manifestDoc.data();
+        if (manifestData?.status === "LIQUIDATED") {
+          throw new Error("El manifiesto de ruta ya fue liquidado. No se puede anular esta venta.");
+        }
+      }
+
+      let orderRef: admin.firestore.DocumentReference | null = null;
+      if (saleData.linkedOrderId) {
+        orderRef = adminDb.collection("orders").doc(saleData.linkedOrderId);
+        const orderDoc = await transaction.get(orderRef);
+        if (!orderDoc.exists) {
+          throw new Error("El pedido asociado a esta venta no existe.");
+        }
+      }
+
+      // PRE-FETCH FOR PLANT PRODUCTS AND BATCHES
+      const productDocsMap: Record<string, admin.firestore.DocumentData> = {};
+      const batchDocsMap: Record<string, { ref: admin.firestore.DocumentReference; currentStock: number }> = {};
+
+      if (isPlant) {
+        const uniqueProductIds = Array.from(
+          new Set([
+            ...saleData.items.map((i) => i.productId),
+            ...saleData.returnedEmpties.map((e) => e.productId),
+          ])
+        );
+
+        for (const pId of uniqueProductIds) {
+          const pRef = adminDb.collection(PRODUCTS_COLLECTION).doc(pId);
+          const pDoc = await transaction.get(pRef);
+          productDocsMap[pId] = pDoc.exists ? (pDoc.data() || {}) : {};
+        }
+
+        for (const item of saleData.items) {
+          const isBottleOnly = item.lotNumber === "" || (item as SaleItemWithSaleType).itemSaleType === "BOTTLE";
+          if (isBottleOnly || item.lotNumber === "GENERIC" || !item.lotNumber) continue;
+
+          const batchQuery = await adminDb
+            .collection(PRODUCTION_COLLECTION)
+            .where("productId", "==", item.productId)
+            .where("lotNumber", "==", item.lotNumber)
+            .limit(1)
+            .get();
+
+          if (!batchQuery.empty) {
+            const docRef = batchQuery.docs[0].ref;
+            const batchDoc = await transaction.get(docRef);
+            batchDocsMap[`${item.productId}_${item.lotNumber}`] = {
+              ref: docRef,
+              currentStock: batchDoc.exists ? batchDoc.data()?.currentStock || 0 : 0,
+            };
+          }
+        }
+      }
+
+      // 1. CÁLCULO DE REVERSA DE ENVASES
+      const deltaMap = new Map<string, number>();
+      (saleData.items || []).forEach((item) => {
+        deltaMap.set(item.productId, (deltaMap.get(item.productId) || 0) - item.quantity);
+      });
+      (saleData.returnedEmpties || []).forEach((empty) => {
+        deltaMap.set(empty.productId, (deltaMap.get(empty.productId) || 0) + empty.quantity);
+      });
+
+      const containerDeltas = Array.from(deltaMap.entries())
+        .map(([productId, delta]) => ({ productId, delta }))
+        .filter((x) => x.delta !== 0);
+
+      const customerData = customerDoc.data() as Customer;
+      const currentBalances = customerData.containerBalances || [];
+      const newBalanceMap = new Map<string, number>();
+
+      currentBalances.forEach((b) => newBalanceMap.set(b.productId, b.balance));
+      deltaMap.forEach((delta, productId) => {
+        const current = newBalanceMap.get(productId) || 0;
+        newBalanceMap.set(productId, current + delta);
+      });
+
+      const newContainerBalances = Array.from(newBalanceMap.entries())
+        .map(([productId, balance]) => ({ productId, balance }));
+
+      // 2. CÁLCULO DE REVERSA DE DEUDA
+      const totalPaid = (saleData.cashReceived || 0) + (saleData.digitalReceived || 0);
+      const originalDebtAdded = saleData.paymentMethod === "CREDIT"
+        ? saleData.totalAmount
+        : Math.max(0, saleData.totalAmount - totalPaid);
+
+      const debtToSubtract = saleData.remainingBalance !== undefined
+        ? saleData.remainingBalance
+        : originalDebtAdded;
+
+      // 3. ESCRITURAS COMUNES
+      transaction.update(saleRef, {
+        status: "CANCELLED",
+        cancelledBy: cancelledByUid,
+        cancellationReason: reason,
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      transaction.update(customerRef, {
+        containerBalances: newContainerBalances,
+        debtAmount: admin.firestore.FieldValue.increment(-debtToSubtract),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      if (containerDeltas.length > 0) {
+        const containerLogRef = adminDb.collection(CUSTOMER_CONTAINER_LOGS_COLLECTION).doc();
+        transaction.set(containerLogRef, {
+          id: containerLogRef.id,
+          customerId: saleData.customerId,
+          type: "REVERSAL",
+          saleId: saleId,
+          manifestId: saleData.manifestId !== "PLANT_SALE" ? (saleData.manifestId || null) : null,
+          delta: containerDeltas,
+          detail: {
+            items: saleData.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+            returnedEmpties: saleData.returnedEmpties.map((e) => ({ productId: e.productId, quantity: e.quantity })),
+          },
+          balanceAfter: newContainerBalances,
+          userId: cancelledByUid,
+          reason: reason,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      // 4. ESCRITURAS ESPECÍFICAS
+      if (isPlant) {
+        // VENTA PLANTA
+        saleData.items.forEach((item) => {
+          const isBottleOnly = item.lotNumber === "" || (item as SaleItemWithSaleType).itemSaleType === "BOTTLE";
+          if (isBottleOnly) return;
+
+          const productRef = adminDb.collection(PRODUCTS_COLLECTION).doc(item.productId);
+          const productData = productDocsMap[item.productId] || {};
+          const previousStockFilled = productData.stockFilled || 0;
+          const newStockFilled = previousStockFilled + item.quantity;
+
+          transaction.update(productRef, {
+            stockFilled: newStockFilled,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          productDocsMap[item.productId].stockFilled = newStockFilled;
+
+          if (item.lotNumber && item.lotNumber !== "GENERIC") {
+            const batchInfo = batchDocsMap[`${item.productId}_${item.lotNumber}`];
+            if (batchInfo) {
+              transaction.update(batchInfo.ref, {
+                currentStock: batchInfo.currentStock + item.quantity,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              batchInfo.currentStock += item.quantity;
+            }
+          }
+
+          const kardexRef = adminDb.collection("kardexLogs").doc();
+          transaction.set(kardexRef, {
+            productId: item.productId,
+            type: "IN",
+            phase: "FILLED",
+            quantity: item.quantity,
+            lotNumber: item.lotNumber || "GENERIC",
+            referenceId: saleId,
+            referenceType: "SALE_CANCELLATION",
+            previousStock: previousStockFilled,
+            newStock: newStockFilled,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            movementType: "REVERSAL",
+            delta: item.quantity,
+            resultingBalance: newStockFilled,
+            userId: cancelledByUid,
+          });
+        });
+
+        saleData.returnedEmpties.forEach((empty) => {
+          if (empty.quantity <= 0) return;
+          const productRef = adminDb.collection(PRODUCTS_COLLECTION).doc(empty.productId);
+          const productData = productDocsMap[empty.productId] || {};
+          const previousStockEmpty = productData.stockEmpty || 0;
+          const newStockEmpty = previousStockEmpty - empty.quantity;
+
+          transaction.update(productRef, {
+            stockEmpty: newStockEmpty,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          productDocsMap[empty.productId].stockEmpty = newStockEmpty;
+
+          const kardexRef = adminDb.collection("kardexLogs").doc();
+          transaction.set(kardexRef, {
+            productId: empty.productId,
+            type: "OUT",
+            phase: "EMPTY",
+            quantity: empty.quantity,
+            referenceId: saleId,
+            referenceType: "SALE_CANCELLATION",
+            previousStock: previousStockEmpty,
+            newStock: newStockEmpty,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            movementType: "REVERSAL",
+            delta: -empty.quantity,
+            resultingBalance: newStockEmpty,
+            userId: cancelledByUid,
+          });
+        });
+      } else {
+        // VENTA RUTA
+        if (saleData.linkedOrderId) {
+          // ROUTE-pedido
+          transaction.update(orderRef!, {
+            status: "ASSIGNED",
+            saleId: null,
+            deliveredAt: null,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        } else {
+          // ROUTE-directa
+          const manifestData = manifestDoc!.data() as DispatchManifest;
+          const manifestItems = [...(manifestData.items || [])];
+
+          saleData.items.forEach((saleItem) => {
+            const idx = manifestItems.findIndex(
+              (mItem) =>
+                mItem.productId === saleItem.productId &&
+                mItem.lotNumber === saleItem.lotNumber
+            );
+            if (idx >= 0) {
+              manifestItems[idx].quantitySold = Math.max(
+                0,
+                (manifestItems[idx].quantitySold || 0) - saleItem.quantity
+              );
+            }
+          });
+
+          const newCashExpected = Math.max(
+            0,
+            (manifestData.cashExpected || 0) - (saleData.cashReceived || 0)
+          );
+          const newDigitalExpected = Math.max(
+            0,
+            (manifestData.digitalPaymentsExpected || 0) - (saleData.digitalReceived || 0)
+          );
+
+          transaction.update(manifestRef!, {
+            items: manifestItems,
+            cashExpected: newCashExpected,
+            digitalPaymentsExpected: newDigitalExpected,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    });
   },
 };

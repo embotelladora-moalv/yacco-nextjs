@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import SunatPanel from "@/components/sunat/SunatPanel";
 import GrePanel from "@/components/sunat/GrePanel";
 import { salesRepository } from "@/services/repositories/salesRepository";
+import { CancelSaleButton } from "./CancelSaleButton";
 
 interface PageProps {
   params: Promise<{ id: string }> | { id: string };
@@ -83,6 +84,14 @@ export default async function SaleDetailPage({ params }: PageProps) {
             </h1>
           </div>
         </div>
+        <div>
+          <CancelSaleButton
+            saleId={saleId}
+            status={saleData.status}
+            isBilled={saleData.isBilled}
+            sunatDocumentId={saleData.sunatDocumentId}
+          />
+        </div>
       </div>
 
       {/* DISEÑO PRINCIPAL EN DOS COLUMNAS */}
@@ -90,6 +99,23 @@ export default async function SaleDetailPage({ params }: PageProps) {
         {/* COLUMNA IZQUIERDA: RESUMEN DE COMPRA E ÍTEMS (8 Columnas) */}
         <div className="lg:col-span-8 space-y-6">
           <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm space-y-6">
+            {saleData.status === "CANCELLED" && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-red-800 space-y-2">
+                <div className="flex items-center gap-2 font-black text-sm">
+                  <span className="bg-red-600 text-white px-2 py-0.5 rounded text-[10px] uppercase font-black">
+                    Anulada
+                  </span>
+                  <span>Esta venta ha sido anulada por contra-asiento</span>
+                </div>
+                <div className="text-xs space-y-1 font-medium text-red-700">
+                  <p><strong>Motivo:</strong> {saleData.cancellationReason || "No especificado"}</p>
+                  <p>
+                    <strong>Por:</strong> {saleData.cancelledBy || "Sistema"} el{" "}
+                    {formatDate(saleData.cancelledAt)}
+                  </p>
+                </div>
+              </div>
+            )}
             {/* Cabecera Informativa con Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
               <div className="flex items-center gap-3">
