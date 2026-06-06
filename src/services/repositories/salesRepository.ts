@@ -884,9 +884,13 @@ export const salesRepository = {
     isBilled?: boolean;
     startDate?: string;
     endDate?: string;
+    includeCancelled?: boolean;
   }) {
     let query: admin.firestore.Query = adminDb.collection(SALES_COLLECTION);
 
+    if (!options.includeCancelled) {
+      query = query.where("status", "==", "COMPLETED");
+    }
     if (options.paymentFilter && options.paymentFilter !== "ALL") {
       query = query.where("paymentMethod", "==", options.paymentFilter);
     }
@@ -920,7 +924,10 @@ export const salesRepository = {
         "isBilled",
         "sunatDocumentId",
         "items",
-        "billingSkipped"
+        "billingSkipped",
+        "status",
+        "cancellationReason",
+        "cancelledAt"
       )
       .orderBy("createdAt", "desc")
       .orderBy("__name__", "desc");
@@ -947,7 +954,9 @@ export const salesRepository = {
     startDate?: string;
     endDate?: string;
   }) {
-    let query: admin.firestore.Query = adminDb.collection(SALES_COLLECTION);
+    let query: admin.firestore.Query = adminDb
+      .collection(SALES_COLLECTION)
+      .where("status", "==", "COMPLETED");
 
     if (options.paymentFilter && options.paymentFilter !== "ALL") {
       query = query.where("paymentMethod", "==", options.paymentFilter);

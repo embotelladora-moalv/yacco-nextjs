@@ -37,6 +37,7 @@ interface SalesListProps {
   currentCursors: string;
   currentLimit: number;
   currentFilter: string;
+  currentIncludeCancelled: boolean;
 }
 
 export function SalesListClient({
@@ -48,6 +49,7 @@ export function SalesListClient({
   currentCursors,
   currentLimit,
   currentFilter,
+  currentIncludeCancelled,
 }: SalesListProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -141,7 +143,12 @@ export function SalesListClient({
   };
 
   // --- LÓGICA DE NAVEGACIÓN ---
-  const navigate = (params: { filter?: string; cursors?: string; limit?: number }) => {
+  const navigate = (params: {
+    filter?: string;
+    cursors?: string;
+    limit?: number;
+    includeCancelled?: boolean;
+  }) => {
     const query = new URLSearchParams();
     const newFilter = params.filter !== undefined ? params.filter : currentFilter;
     if (newFilter && newFilter !== "ALL") {
@@ -153,6 +160,14 @@ export function SalesListClient({
     }
     const newLimit = params.limit !== undefined ? params.limit : currentLimit;
     query.set("limit", String(newLimit));
+
+    const newIncludeCancelled =
+      params.includeCancelled !== undefined
+        ? params.includeCancelled
+        : currentIncludeCancelled;
+    if (newIncludeCancelled) {
+      query.set("includeCancelled", "true");
+    }
 
     startTransition(() => {
       router.push(`${pathname}?${query.toString()}`);
@@ -174,6 +189,10 @@ export function SalesListClient({
   const applyFilters = (newFilter: string) => {
     setShowFilters(false);
     navigate({ filter: newFilter, cursors: "" }); // Reset de cursores al filtrar
+  };
+
+  const toggleIncludeCancelled = (checked: boolean) => {
+    navigate({ includeCancelled: checked, cursors: "" });
   };
 
   const displaySales = sales.filter((sale) => {
@@ -210,10 +229,14 @@ export function SalesListClient({
           <Button
             variant="outline"
             onClick={() => setShowFilters(!showFilters)}
-            className={`font-bold rounded-xl flex items-center gap-2 px-5 py-2.5 h-auto ${paymentFilter !== "ALL" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "text-slate-600"}`}
+            className={`font-bold rounded-xl flex items-center gap-2 px-5 py-2.5 h-auto ${
+              paymentFilter !== "ALL" || currentIncludeCancelled
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "text-slate-600"
+            }`}
           >
             <Filter className="h-4 w-4" /> Filtros
-            {paymentFilter !== "ALL" && (
+            {(paymentFilter !== "ALL" || currentIncludeCancelled) && (
               <span className="h-2 w-2 rounded-full bg-emerald-500 ml-1"></span>
             )}
           </Button>
@@ -228,7 +251,9 @@ export function SalesListClient({
                 <button
                   key={filter}
                   onClick={() => applyFilters(filter)}
-                  className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition-colors ${paymentFilter === filter ? "bg-slate-100 text-slate-900" : "text-slate-600 hover:bg-slate-50"}`}
+                  className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition-colors ${
+                    paymentFilter === filter ? "bg-slate-100 text-slate-900" : "text-slate-600 hover:bg-slate-50"
+                  }`}
                 >
                   {filter === "ALL"
                     ? "Todos los métodos"
@@ -241,6 +266,18 @@ export function SalesListClient({
                           : "Créditos (Deudas)"}
                 </button>
               ))}
+
+              <div className="border-t border-slate-100 my-2 pt-2 px-3">
+                <label className="flex items-center gap-2 cursor-pointer select-none py-1.5">
+                  <input
+                    type="checkbox"
+                    checked={currentIncludeCancelled}
+                    onChange={(e) => toggleIncludeCancelled(e.target.checked)}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+                  />
+                  <span className="text-xs font-bold text-slate-700">Incluir anuladas</span>
+                </label>
+              </div>
             </div>
           )}
         </div>
@@ -297,7 +334,9 @@ export function SalesListClient({
                       onClick={() =>
                         setExpandedSaleId(isExpanded ? null : sale.id)
                       }
-                      className={`transition-colors cursor-pointer ${isExpanded ? "bg-slate-50/80" : "hover:bg-slate-50/50"}`}
+                      className={`transition-colors cursor-pointer ${isExpanded ? "bg-slate-50/80" : "hover:bg-slate-50/50"} ${
+                        sale.status === "CANCELLED" ? "opacity-60" : ""
+                      }`}
                     >
                       <td className="px-6 py-4 text-center font-black text-slate-300">
                         {globalIndex}
@@ -330,7 +369,11 @@ export function SalesListClient({
 
                       {/* CELDA DE BADGE DE SUNAT */}
                       <td className="px-6 py-4 text-center">
-                        {isBilled ? (
+                        {sale.status === "CANCELLED" ? (
+                          <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border border-red-200">
+                            ANULADA
+                          </span>
+                        ) : isBilled ? (
                           <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider">
                             <CheckCircle2 className="h-3 w-3" /> Facturado
                           </span>
@@ -342,10 +385,19 @@ export function SalesListClient({
                       </td>
 
                       <td className="px-6 py-4 text-right">
-                        <div className="text-lg font-black text-slate-900">
+                        <div
+                          className={`text-lg font-black ${
+                            sale.status === "CANCELLED" ? "line-through text-slate-400 font-bold" : "text-slate-900"
+                          }`}
+                        >
                           {/* 🔥 USAMOS LA VARIABLE CALCULADA */}
                           S/ {totalAmountCalculated.toFixed(2)}
                         </div>
+                        {sale.status === "CANCELLED" && (
+                          <div className="text-[10px] text-red-500 font-bold tracking-wide">
+                            (Anulada)
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-center text-slate-400">
                         {isExpanded ? (
@@ -360,126 +412,126 @@ export function SalesListClient({
                     {isExpanded && (
                       <tr className="bg-slate-50/80 border-b border-slate-200">
                         <td colSpan={7} className="px-6 py-6">
-                          <div className="max-w-4xl mx-auto bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col lg:flex-row gap-8">
-                            {/* LADO IZQUIERDO: PRODUCTOS */}
-                            <div className="flex-1 space-y-4">
-                              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                                <Package className="h-4 w-4" /> Detalle de
-                                Productos
-                              </h4>
-                              <div className="border border-slate-100 rounded-xl overflow-hidden">
-                                <table className="w-full text-xs">
-                                  <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
-                                    <tr>
-                                      <th className="py-2 px-3 text-left">
-                                        Cant.
-                                      </th>
-                                      <th className="py-2 px-3 text-left">
-                                        Producto
-                                      </th>
-                                      <th className="py-2 px-3 text-right">
-                                        P. Unit
-                                      </th>
-                                      <th className="py-2 px-3 text-right">
-                                        Subtotal
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-50">
-                                    {sale.items.map((item, idx) => (
-                                      <tr
-                                        key={idx}
-                                        className="font-medium text-slate-700"
-                                      >
-                                        <td className="py-2 px-3">
-                                          {item.quantity}
-                                        </td>
-                                        <td className="py-2 px-3">
-                                          {getProductName(item.productId)}
-                                        </td>
-                                        <td className="py-2 px-3 text-right">
-                                          S/ {item.unitPrice.toFixed(2)}
-                                        </td>
-                                        <td className="py-2 px-3 text-right font-bold">
-                                          S/{" "}
-                                          {(
-                                            item.quantity * item.unitPrice
-                                          ).toFixed(2)}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-
-                            {/* LADO DERECHO: FACTURACIÓN SUNAT */}
-                            <div className="w-full lg:w-72 space-y-4 border-t lg:border-t-0 lg:border-l border-slate-100 pt-6 lg:pt-0 lg:pl-8">
-                              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                                <ReceiptText className="h-4 w-4" /> Comprobante
-                                Electrónico
-                              </h4>
-
-                              <div className="bg-slate-50 p-5 rounded-xl border border-slate-100 space-y-4">
-                                {isBilled ? (
-                                  <div className="text-center space-y-3">
-                                    <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
-                                    <div>
-                                      <p className="text-sm font-black text-slate-900">
-                                        Enviado a SUNAT
-                                      </p>
-                                      <p className="text-xs font-bold text-emerald-600 bg-emerald-50 py-1 px-2 mt-1 rounded-md inline-block uppercase tracking-wider border border-emerald-100">
-                                        {sunatDocId}
-                                      </p>
-                                    </div>
-                                    <Button
-                                      asChild
-                                      variant="outline"
-                                      className="w-full mt-2 font-bold text-slate-600"
-                                    >
-                                      <Link href={`/sales/${sale.id}`}>
-                                        Ver Documentos (PDF/XML)
-                                      </Link>
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-3">
-                                    <p className="text-xs text-slate-500 font-medium text-center mb-2">
-                                      Este ticket está pendiente de emisión
-                                      tributaria o guía.
-                                    </p>
-
-                                    {/* BOTÓN RÁPIDO DE FACTURACIÓN */}
-                                    <EmitReceiptButton
-                                      saleId={sale.id}
-                                      customerDocument={
-                                        customer?.documentNumber || ""
-                                      }
-                                    />
-
-                                    <div className="relative py-2">
-                                      <div className="absolute inset-0 flex items-center">
-                                        <span className="w-full border-t border-slate-200" />
-                                      </div>
-                                      <div className="relative flex justify-center">
-                                        <span className="bg-slate-50 px-2 text-[10px] uppercase font-bold text-slate-400 tracking-widest">
-                                          O también
-                                        </span>
-                                      </div>
-                                    </div>
-
-                                    {/* NUEVO BOTÓN PARA IR DIRECTO A DETALLES (GUÍAS) */}
-                                    <Button
-                                      asChild
-                                      variant="outline"
-                                      className="w-full font-bold text-slate-700 bg-white border-slate-300 hover:bg-slate-100"
-                                    >
-                                      <Link href={`/sales/${sale.id}`}>
-                                        Ver Detalles y Emitir Guía (GRE)
-                                      </Link>
-                                    </Button>
-                                  </div>
+                          <div className="max-w-4xl mx-auto bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col gap-6">
+                            {sale.status === "CANCELLED" && (
+                              <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800 space-y-1">
+                                <p className="font-black flex items-center gap-1.5">
+                                  <span className="h-2 w-2 rounded-full bg-red-600 animate-pulse"></span>
+                                  VENTA ANULADA
+                                </p>
+                                <p className="font-semibold text-xs text-red-700">
+                                  Motivo de anulación:{" "}
+                                  <span className="font-medium text-slate-800">
+                                    {sale.cancellationReason || "No especificado"}
+                                  </span>
+                                </p>
+                                {sale.cancelledAt && (
+                                  <p className="text-[11px] text-red-500 font-medium">
+                                    Anulada el: {formatDate(sale.cancelledAt as unknown as string)}
+                                  </p>
                                 )}
+                              </div>
+                            )}
+
+                            <div className="flex flex-col lg:flex-row gap-8">
+                              {/* LADO IZQUIERDO: PRODUCTOS */}
+                              <div className="flex-1 space-y-4">
+                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                  <Package className="h-4 w-4" /> Detalle de Productos
+                                </h4>
+                                <div className="border border-slate-100 rounded-xl overflow-hidden">
+                                  <table className="w-full text-xs">
+                                    <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                                      <tr>
+                                        <th className="py-2 px-3 text-left">Cant.</th>
+                                        <th className="py-2 px-3 text-left">Producto</th>
+                                        <th className="py-2 px-3 text-right">P. Unit</th>
+                                        <th className="py-2 px-3 text-right">Subtotal</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                      {sale.items.map((item, idx) => (
+                                        <tr key={idx} className="font-medium text-slate-700">
+                                          <td className="py-2 px-3">{item.quantity}</td>
+                                          <td className="py-2 px-3">{getProductName(item.productId)}</td>
+                                          <td className="py-2 px-3 text-right">
+                                            S/ {item.unitPrice.toFixed(2)}
+                                          </td>
+                                          <td className="py-2 px-3 text-right font-bold">
+                                            S/ {(item.quantity * item.unitPrice).toFixed(2)}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+
+                              {/* LADO DERECHO: FACTURACIÓN SUNAT */}
+                              <div className="w-full lg:w-72 space-y-4 border-t lg:border-t-0 lg:border-l border-slate-100 pt-6 lg:pt-0 lg:pl-8">
+                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                  <ReceiptText className="h-4 w-4" /> Comprobante Electrónico
+                                </h4>
+
+                                <div className="bg-slate-50 p-5 rounded-xl border border-slate-100 space-y-4">
+                                  {sale.status === "CANCELLED" ? (
+                                    <div className="text-center space-y-2 py-4">
+                                      <p className="text-xs text-slate-400 font-bold">Venta anulada.</p>
+                                      <p className="text-[11px] text-slate-400 font-medium">
+                                        No se pueden emitir ni consultar comprobantes para tickets anulados.
+                                      </p>
+                                    </div>
+                                  ) : isBilled ? (
+                                    <div className="text-center space-y-3">
+                                      <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
+                                      <div>
+                                        <p className="text-sm font-black text-slate-900">Enviado a SUNAT</p>
+                                        <p className="text-xs font-bold text-emerald-600 bg-emerald-50 py-1 px-2 mt-1 rounded-md inline-block uppercase tracking-wider border border-emerald-100">
+                                          {sunatDocId}
+                                        </p>
+                                      </div>
+                                      <Button
+                                        asChild
+                                        variant="outline"
+                                        className="w-full mt-2 font-bold text-slate-600"
+                                      >
+                                        <Link href={`/sales/${sale.id}`}>Ver Documentos (PDF/XML)</Link>
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-3">
+                                      <p className="text-xs text-slate-500 font-medium text-center mb-2">
+                                        Este ticket está pendiente de emisión tributaria o guía.
+                                      </p>
+
+                                      {/* BOTÓN RÁPIDO DE FACTURACIÓN */}
+                                      <EmitReceiptButton
+                                        saleId={sale.id}
+                                        customerDocument={customer?.documentNumber || ""}
+                                      />
+
+                                      <div className="relative py-2">
+                                        <div className="absolute inset-0 flex items-center">
+                                          <span className="w-full border-t border-slate-200" />
+                                        </div>
+                                        <div className="relative flex justify-center">
+                                          <span className="bg-slate-50 px-2 text-[10px] uppercase font-bold text-slate-400 tracking-widest">
+                                            O también
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {/* NUEVO BOTÓN PARA IR DIRECTO A DETALLES (GUÍAS) */}
+                                      <Button
+                                        asChild
+                                        variant="outline"
+                                        className="w-full font-bold text-slate-700 bg-white border-slate-300 hover:bg-slate-100"
+                                      >
+                                        <Link href={`/sales/${sale.id}`}>Ver Detalles y Emitir Guía (GRE)</Link>
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>

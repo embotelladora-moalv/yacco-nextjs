@@ -14,6 +14,7 @@ interface PageProps {
     cursors?: string;
     limit?: string;
     filter?: string;
+    includeCancelled?: string;
   }>;
 }
 
@@ -22,6 +23,9 @@ export default async function SalesPage({ searchParams }: PageProps) {
   const cursorsParam = resolvedSearchParams.cursors || "";
   const limit = resolvedSearchParams.limit ? parseInt(resolvedSearchParams.limit, 10) : 10;
   const filter = resolvedSearchParams.filter || "ALL";
+  const includeCancelled =
+    resolvedSearchParams.includeCancelled === "true" ||
+    resolvedSearchParams.includeCancelled === "1";
 
   // Descomponemos la pila de cursores de la URL. El cursor activo para Firestore es el último
   const cursorArray = cursorsParam ? cursorsParam.split(",") : [];
@@ -32,6 +36,7 @@ export default async function SalesPage({ searchParams }: PageProps) {
       pageSize: limit,
       cursor: currentCursor,
       paymentFilter: filter,
+      includeCancelled,
     }),
     salesRepository.getSalesMetrics({
       paymentFilter: filter,
@@ -40,7 +45,7 @@ export default async function SalesPage({ searchParams }: PageProps) {
   ]);
 
   const { items: sales, nextCursor, hasMore } = paginatedData;
-  const { totalRevenue, totalCash, totalDigital } = metrics;
+  const { totalRevenue, totalDigital } = metrics;
 
   const customerIds = Array.from(
     new Set(sales.map((s) => s.customerId).filter(Boolean)),
@@ -106,6 +111,7 @@ export default async function SalesPage({ searchParams }: PageProps) {
         currentCursors={cursorsParam}
         currentLimit={limit}
         currentFilter={filter}
+        currentIncludeCancelled={includeCancelled}
       />
     </div>
   );
