@@ -92,7 +92,8 @@ export const advancedPitStopSchema = z.object({
     .array(
       z.object({
         productId: z.string().min(1, "Seleccione producto"),
-        quantity: z.coerce.number().min(1, "Mínimo 1"),
+        lotNumber: z.string().min(1, "Lote requerido"),
+        quantity: z.coerce.number().min(0, "Mínimo 0").default(0),
       }),
     )
     .default([]),
