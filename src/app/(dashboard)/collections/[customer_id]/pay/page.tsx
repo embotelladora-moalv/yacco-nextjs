@@ -1,5 +1,6 @@
 import { customerRepository } from "@/services/repositories/customerRepository";
 import { salesRepository } from "@/services/repositories/salesRepository";
+import { bankRepository } from "@/services/repositories/bankRepository";
 import { adminDb } from "@/services/firebase/admin";
 import { notFound, redirect } from "next/navigation";
 import { PaymentForm } from "./PaymentForm";
@@ -18,12 +19,13 @@ export default async function CustomerPaymentPage({
   const customerId = resolvedParams.customer_id;
 
   // 1. Obtenemos toda la data en paralelo para mayor velocidad
-  const [customer, pendingSales, paymentHistory, usersSnapshot] =
+  const [customer, pendingSales, paymentHistory, usersSnapshot, banks] =
     await Promise.all([
       customerRepository.getCustomerById(customerId),
       salesRepository.getPendingSalesByCustomer(customerId),
       salesRepository.getCustomerPaymentHistory(customerId),
       adminDb.collection("users").where("isActive", "==", true).get(),
+      bankRepository.getActiveBanks(),
     ]);
 
   if (!customer) {
@@ -69,6 +71,7 @@ export default async function CustomerPaymentPage({
           customer={customer}
           users={users}
           pendingSales={pendingSales}
+          banks={banks}
         />
 
         {/* Envolvemos el historial en un max-w-6xl para que su ancho coincida perfectamente con el del PaymentForm */}

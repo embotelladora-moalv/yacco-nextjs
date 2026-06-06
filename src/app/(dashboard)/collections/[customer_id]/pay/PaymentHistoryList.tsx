@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 interface PaymentHistoryListProps {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payments: any[];
 }
 
@@ -28,11 +29,13 @@ export function PaymentHistoryList({ payments }: PaymentHistoryListProps) {
 
   const renderMethod = (method: string) => {
     const methods: Record<string, string> = {
-      TRANSFER: "Transferencia / Yape",
       CASH: "Efectivo",
+      TRANSFER: "Transferencia",
+      YAPE_PLIN: "Yape / Plin",
       CHECK: "Cheque",
+      OTHER: "Otro",
     };
-    return methods[method] || method;
+    return methods[method] || method || "Otro";
   };
 
   const handleCancelPayment = async (paymentId: string, customerId: string) => {
@@ -120,6 +123,7 @@ export function PaymentHistoryList({ payments }: PaymentHistoryListProps) {
                         timeZone: "America/Lima",
                       })}{" "}
                       {renderMethod(payment.paymentMethod)}
+                      {payment.paymentMethod === "TRANSFER" && payment.bankName && ` (${payment.bankName})`}
                     </p>
                   </div>
                 </div>
@@ -154,7 +158,7 @@ export function PaymentHistoryList({ payments }: PaymentHistoryListProps) {
                     Distribución del Abono:
                   </p>
                   <div className="space-y-2">
-                    {payment.appliedTo?.map((item: any, idx: number) => (
+                    {payment.appliedTo?.map((item: { saleId: string; amountApplied: number }, idx: number) => (
                       <div
                         key={idx}
                         className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-100 text-xs"

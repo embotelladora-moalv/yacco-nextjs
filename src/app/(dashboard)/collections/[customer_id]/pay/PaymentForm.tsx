@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { registerPaymentAction } from "../../actions";
 import { Customer, Sale } from "@/core/entities/CRM";
 import { User } from "@/core/entities/User";
+import { Bank } from "@/core/entities/Bank";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,33 +18,47 @@ import {
   User as UserIcon,
   Calendar,
   CreditCard,
+  Building2,
   FileText,
-  ArrowRight,
   CheckCircle2,
   Save,
-  AlertCircle,
 } from "lucide-react";
 import {
-  paymentSchema as debtPaymentSchema,
+  paymentBaseSchema,
   PaymentFormValues as DebtPaymentFormValues,
 } from "@/core/validations/paymentSchema";
 
-// Hacemos que el campo receivedById sea opcional a nivel de formulario
+// Hacemos que el campo receivedById sea opcional a nivel de formulario y validamos bankId si es TRANSFER
 import { z } from "zod";
-const formSchema = debtPaymentSchema.extend({
-  receivedById: z.string().optional(),
-});
+const formSchema = paymentBaseSchema
+  .extend({
+    receivedById: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.paymentMethod === "TRANSFER" && (!data.bankId || data.bankId.trim() === "")) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: "El banco es obligatorio para transferencias",
+      path: ["bankId"],
+    }
+  );
 
 interface PaymentFormProps {
   customer: Customer;
   users: User[];
   pendingSales: Sale[]; // <-- Agregado para ver el detalle FIFO
+  banks: Bank[];
 }
 
 export function PaymentForm({
   customer,
   users,
   pendingSales,
+  banks,
 }: PaymentFormProps) {
   const [isPending, setIsPending] = useState(false);
   const router = useRouter();
@@ -52,12 +67,15 @@ export function PaymentForm({
   const todayStr = new Date().toISOString().split("T")[0];
 
   const form = useForm<DebtPaymentFormValues>({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(formSchema) as any,
     defaultValues: {
       customerId: customer.id,
       amount: currentDebt, // Sugerimos pagar todo por defecto
       date: todayStr,
-      paymentMethod: "TRANSFER",
+      paymentMethod: "CASH",
+      bankId: "",
+      bankName: "",
       reference: "",
       receivedById: "", // Puede quedar vacío
       notes: "",
@@ -65,7 +83,15 @@ export function PaymentForm({
   });
 
   const watchAmount = form.watch("amount");
+  const watchPaymentMethod = form.watch("paymentMethod");
   const remainingDebt = Math.max(0, currentDebt - (Number(watchAmount) || 0));
+
+  useEffect(() => {
+    if (watchPaymentMethod !== "TRANSFER") {
+      form.setValue("bankId", "");
+      form.setValue("bankName", "");
+    }
+  }, [watchPaymentMethod, form]);
 
   const onSubmit = async (values: DebtPaymentFormValues) => {
     if (values.amount > currentDebt) {
@@ -76,7 +102,11 @@ export function PaymentForm({
     }
 
     setIsPending(true);
-    const result = await registerPaymentAction(values);
+    const selectedBank = banks.find((b) => b.id === values.bankId);
+    const result = await registerPaymentAction({
+      ...values,
+      bankName: selectedBank ? selectedBank.name : undefined,
+    });
     setIsPending(false);
 
     if (result.success) {
@@ -211,7 +241,7 @@ export function PaymentForm({
                 Pagar (S/) *
               </Label>
               <Input
-                {...form.register("amount")}
+                {...form.register("amount", { valueAsNumber: true })}
                 type="number"
                 step="0.10"
                 min="0.1"
@@ -244,12 +274,35 @@ export function PaymentForm({
                 {...form.register("paymentMethod")}
                 className="w-full h-12 px-4 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white"
               >
-                <option value="TRANSFER">Transferencia / Yape / Plin</option>
-                <option value="CASH">Efectivo Físico</option>
-                <option value="CHECK">Cheque</option>
-                <option value="OTHER">Otro</option>
+                <option value="CASH">Efectivo</option>
+                <option value="TRANSFER">Transferencia</option>
+                <option value="YAPE_PLIN">Yape / Plin</option>
               </select>
             </div>
+
+            {watchPaymentMethod === "TRANSFER" && (
+              <div className="space-y-2">
+                <Label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-emerald-500" /> Banco de Destino *
+                </Label>
+                <select
+                  {...form.register("bankId")}
+                  className="w-full h-12 px-4 rounded-xl border border-slate-200 font-bold text-slate-700 bg-white"
+                >
+                  <option value="">-- Seleccionar Banco --</option>
+                  {banks.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} {b.accountNumber ? `(${b.accountNumber})` : ""}
+                    </option>
+                  ))}
+                </select>
+                {form.formState.errors.bankId && (
+                  <p className="text-xs text-red-500 font-bold">
+                    {form.formState.errors.bankId.message}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">

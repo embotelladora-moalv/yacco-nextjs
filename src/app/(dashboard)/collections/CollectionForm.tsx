@@ -18,6 +18,7 @@ import { Wallet, Info, FileDigit } from "lucide-react";
 export function CollectionForm({
   customersWithDebt,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   customersWithDebt: any[];
 }) {
   const [isLoading, setIsLoading] = useState(false);
@@ -29,7 +30,7 @@ export function CollectionForm({
       customerId: "",
       amount: 0,
       date: new Date().toISOString().split("T")[0],
-      paymentMethod: "TRANSFER",
+      paymentMethod: "CASH",
       reference: "",
       notes: "",
     },
@@ -137,10 +138,9 @@ export function CollectionForm({
               {...form.register("paymentMethod")}
               className="w-full h-12 px-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-600 outline-none font-medium"
             >
-              <option value="TRANSFER">Transferencia / Yape / Plin</option>
               <option value="CASH">Efectivo (Caja Física)</option>
-              <option value="CHECK">Cheque</option>
-              <option value="OTHER">Otro</option>
+              <option value="TRANSFER">Transferencia</option>
+              <option value="YAPE_PLIN">Yape / Plin</option>
             </select>
           </div>
 
