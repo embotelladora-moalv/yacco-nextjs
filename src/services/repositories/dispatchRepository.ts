@@ -541,7 +541,7 @@ export const dispatchRepository = {
       assistantId?: string;
       newItems: { productId: string; quantityRequested: number }[];
       returnedEmpties: { productId: string; quantity: number }[];
-      returnedFulls: { productId: string; quantity: number }[];
+      returnedFulls: { productId: string; lotNumber: string; quantity: number }[];
       cashHandover: number;
       additionalPettyCash: number;
       notes?: string;
@@ -559,65 +559,133 @@ export const dispatchRepository = {
         throw new Error("El camión no está en ruta");
 
       const kardexEntries: any[] = [];
-      const batchUpdates: any[] = [];
-      const productUpdates: any[] = [];
-
-      // Copia de los items actuales
       const updatedItems = [
         ...(currentManifest.items || currentManifest.loadedItems || []),
       ];
-
-      // 🔥 AGREGAR ESTA LÍNEA QUE FALTABA: Copia de los vacíos actuales
       const updatedReturnedEmpties: any[] = [
         ...(currentManifest.returnedEmpties || []),
       ];
 
-      // ----------------------------------------------------------------
-      // 1. PROCESAR RECARGA DE NUEVOS PRODUCTOS LLENOS (LÓGICA FIFO)
-      // ----------------------------------------------------------------
-      for (const item of reloadRequest.newItems) {
-        if (item.quantityRequested <= 0) continue;
+      // --- 1. PRE-FETCH ALL REQUIRED PRODUCTS ---
+      const productIds = new Set<string>();
+      reloadRequest.newItems.forEach((i) => productIds.add(i.productId));
+      reloadRequest.returnedFulls.forEach((i) => productIds.add(i.productId));
+      reloadRequest.returnedEmpties.forEach((i) => productIds.add(i.productId));
 
-        const productRef = adminDb
-          .collection(PRODUCTS_COLLECTION)
-          .doc(item.productId);
-        const productDoc = await transaction.get(productRef);
-        const productData = productDoc.data() as Product;
-
-        if (productData.stockFilled < item.quantityRequested) {
-          throw new Error(
-            `Stock insuficiente para recargar ${productData.name}.`,
-          );
+      const productRefs = Array.from(productIds).map((id) =>
+        adminDb.collection(PRODUCTS_COLLECTION).doc(id),
+      );
+      const productDocs = productRefs.length > 0 ? await transaction.getAll(...productRefs) : [];
+      const productMap: Record<string, Product> = {};
+      productDocs.forEach((doc, idx) => {
+        if (!doc.exists) {
+          throw new Error(`Producto ${productRefs[idx].id} no encontrado`);
         }
+        productMap[doc.id] = doc.data() as Product;
+      });
 
-        const batchesQuery = await transaction.get(
-          adminDb
-            .collection(PRODUCTION_COLLECTION)
-            .where("productId", "==", item.productId)
-            .where("currentStock", ">", 0)
-            .orderBy("currentStock", "asc"),
-        );
-
-        const availableBatches = batchesQuery.docs
-          .map((doc) => ({ id: doc.id, ref: doc.ref, ...(doc.data() as any) }))
+      // --- 2. PRE-FETCH BATCHES FOR FIFO (newItems) ---
+      const newItemsProductIds = Array.from(
+        new Set(reloadRequest.newItems.map((i) => i.productId)),
+      );
+      const newItemsBatchesMap: Record<string, any[]> = {};
+      for (const productId of newItemsProductIds) {
+        const query = adminDb
+          .collection(PRODUCTION_COLLECTION)
+          .where("productId", "==", productId)
+          .where("currentStock", ">", 0);
+        const querySnapshot = await transaction.get(query);
+        const batches = querySnapshot.docs
+          .map((doc) => ({
+            id: doc.id,
+            ref: doc.ref,
+            ...(doc.data() as any),
+          }))
           .sort(
             (a, b) =>
               a.productionDate.toDate().getTime() -
               b.productionDate.toDate().getTime(),
           );
+        newItemsBatchesMap[productId] = batches;
+      }
 
+      // --- 3. PRE-FETCH BATCHES FOR RETURNS (returnedFulls) ---
+      const batchDocsMap: Record<
+        string,
+        { ref: admin.firestore.DocumentReference; currentStock: number }
+      > = {};
+
+      // Seed map from FIFO batches already loaded
+      for (const productId in newItemsBatchesMap) {
+        for (const batch of newItemsBatchesMap[productId]) {
+          batchDocsMap[`${productId}_${batch.lotNumber}`] = {
+            ref: batch.ref,
+            currentStock: batch.currentStock,
+          };
+        }
+      }
+
+      // Load specific lot batches requested for returnedFulls if not already loaded
+      for (const retFull of reloadRequest.returnedFulls) {
+        const key = `${retFull.productId}_${retFull.lotNumber}`;
+        if (!batchDocsMap[key]) {
+          const batchQuery = adminDb
+            .collection(PRODUCTION_COLLECTION)
+            .where("productId", "==", retFull.productId)
+            .where("lotNumber", "==", retFull.lotNumber)
+            .limit(1);
+          const querySnapshot = await transaction.get(batchQuery);
+          if (querySnapshot.empty) {
+            throw new Error(`El lote ${retFull.lotNumber} no existe en la base de datos.`);
+          }
+          const docSnap = querySnapshot.docs[0];
+          batchDocsMap[key] = {
+            ref: docSnap.ref,
+            currentStock: docSnap.data().currentStock || 0,
+          };
+        }
+      }
+
+      // --- 4. INITIALIZE RUNNING BALANCES ---
+      const productStockFilledRunning: Record<string, number> = {};
+      const productStockEmptyRunning: Record<string, number> = {};
+      for (const productId in productMap) {
+        productStockFilledRunning[productId] = productMap[productId].stockFilled || 0;
+        productStockEmptyRunning[productId] = productMap[productId].stockEmpty || 0;
+      }
+
+      const batchStockRunning: Record<string, number> = {};
+      for (const key in batchDocsMap) {
+        batchStockRunning[key] = batchDocsMap[key].currentStock;
+      }
+
+      // --- 5. PROCESS NEW ITEMS (RECHARGE / LOAD) ---
+      for (const item of reloadRequest.newItems) {
+        if (item.quantityRequested <= 0) continue;
+
+        const productData = productMap[item.productId];
+        const currentStockFilled = productStockFilledRunning[item.productId];
+
+        if (currentStockFilled < item.quantityRequested) {
+          throw new Error(
+            `Stock insuficiente para recargar ${productData.name}. Disponible: ${currentStockFilled}, Solicitado: ${item.quantityRequested}`,
+          );
+        }
+
+        const availableBatches = newItemsBatchesMap[item.productId] || [];
         let remainingToFulfill = item.quantityRequested;
 
         for (const batch of availableBatches) {
           if (remainingToFulfill <= 0) break;
-          const takeFromBatch = Math.min(
-            batch.currentStock,
-            remainingToFulfill,
-          );
+
+          const key = `${item.productId}_${batch.lotNumber}`;
+          const currentBatchStock = batchStockRunning[key];
+          if (currentBatchStock <= 0) continue;
+
+          const takeFromBatch = Math.min(currentBatchStock, remainingToFulfill);
 
           const existingItemIndex = updatedItems.findIndex(
-            (i) =>
-              i.productId === item.productId && i.lotNumber === batch.lotNumber,
+            (i) => i.productId === item.productId && i.lotNumber === batch.lotNumber,
           );
 
           if (existingItemIndex >= 0) {
@@ -633,22 +701,19 @@ export const dispatchRepository = {
             });
           }
 
-          batchUpdates.push({
-            ref: batch.ref,
-            newStock: batch.currentStock - takeFromBatch,
-          });
+          batchStockRunning[key] -= takeFromBatch;
           remainingToFulfill -= takeFromBatch;
         }
 
-        if (remainingToFulfill > 0)
-          throw new Error("Inconsistencia de Kardex al recargar lotes.");
+        if (remainingToFulfill > 0) {
+          throw new Error(
+            `Inconsistencia de Kardex al recargar lotes para el producto ${productData.name}. Quedaron ${remainingToFulfill} unidades sin asignar a ningún lote.`,
+          );
+        }
 
-        const newFilledStock = productData.stockFilled - item.quantityRequested;
-        productUpdates.push({
-          ref: productRef,
-          field: "stockFilled",
-          newValue: newFilledStock,
-        });
+        const prevStock = productStockFilledRunning[item.productId];
+        productStockFilledRunning[item.productId] -= item.quantityRequested;
+        const newFilledStock = productStockFilledRunning[item.productId];
 
         kardexEntries.push({
           ref: adminDb.collection(KARDEX_COLLECTION).doc(),
@@ -659,92 +724,93 @@ export const dispatchRepository = {
             quantity: item.quantityRequested,
             referenceType: "DISPATCH_RELOAD",
             referenceId: manifestId,
-            previousStock: productData.stockFilled,
+            previousStock: prevStock,
             newStock: newFilledStock,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            // Nuevos campos
             movementType: "DISPATCH",
             delta: -item.quantityRequested,
             resultingBalance: newFilledStock,
-            userId: currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
+            userId:
+              currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
           },
         });
       }
 
-      // ----------------------------------------------------------------
-      // 2. PROCESAR DESCARGA DE PRODUCTOS LLENOS (Devoluciones anticipadas)
-      // ----------------------------------------------------------------
+      // --- 6. PROCESS RETURNED FULLS (DEPOSIT / RETURN) ---
       for (const retFull of reloadRequest.returnedFulls) {
         if (retFull.quantity <= 0) continue;
 
-        const productRef = adminDb
-          .collection(PRODUCTS_COLLECTION)
-          .doc(retFull.productId);
-        const productDoc = await transaction.get(productRef);
-        const currentFilled = productDoc.data()?.stockFilled || 0;
-
         const existingItemIndex = updatedItems.findIndex(
-          (i) => i.productId === retFull.productId,
+          (i) => i.productId === retFull.productId && i.lotNumber === retFull.lotNumber,
         );
-        if (existingItemIndex >= 0) {
-          updatedItems[existingItemIndex].quantityReturnedFull =
-            (updatedItems[existingItemIndex].quantityReturnedFull || 0) +
-            retFull.quantity;
+        if (existingItemIndex === -1) {
+          throw new Error(
+            `El producto con lote ${retFull.lotNumber} no está registrado en el camión.`,
+          );
         }
 
-        const newFilledStock = currentFilled + retFull.quantity;
-        productUpdates.push({
-          ref: productRef,
-          field: "stockFilled",
-          newValue: newFilledStock,
-        });
+        const mItem = updatedItems[existingItemIndex];
+        const maxDisp =
+          (mItem.quantityLoaded || 0) -
+          (mItem.quantityReturnedFull || 0) -
+          (mItem.wasteQuantity || 0) -
+          (mItem.quantitySold || 0);
+        if (retFull.quantity > maxDisp) {
+          throw new Error(
+            `Intentas devolver más unidades del lote ${retFull.lotNumber} de las disponibles a bordo.`,
+          );
+        }
+
+        // Incrementar el reingreso de llenos en el manifiesto
+        updatedItems[existingItemIndex].quantityReturnedFull =
+          (updatedItems[existingItemIndex].quantityReturnedFull || 0) + retFull.quantity;
+
+        // Sumar al stock de la planta
+        const prevStock = productStockFilledRunning[retFull.productId];
+        productStockFilledRunning[retFull.productId] += retFull.quantity;
+        const newFilledStock = productStockFilledRunning[retFull.productId];
+
+        // Sumar de vuelta al Lote de producción exacto
+        const key = `${retFull.productId}_${retFull.lotNumber}`;
+        batchStockRunning[key] += retFull.quantity;
 
         kardexEntries.push({
           ref: adminDb.collection(KARDEX_COLLECTION).doc(),
           data: {
             productId: retFull.productId,
+            lotNumber: retFull.lotNumber,
             type: "IN",
             phase: "FILLED",
             quantity: retFull.quantity,
             referenceType: "DISPATCH_RELOAD_RETURN",
             referenceId: manifestId,
-            previousStock: currentFilled,
+            previousStock: prevStock,
             newStock: newFilledStock,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            // Nuevos campos
             movementType: "RETURN",
             delta: retFull.quantity,
             resultingBalance: newFilledStock,
-            userId: currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
+            userId:
+              currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
           },
         });
       }
 
-      // ----------------------------------------------------------------
-      // 3. PROCESAR DESCARGA DE ENVASES VACÍOS (LÓGICA INCREMENTAL)
-      // ----------------------------------------------------------------
+      // --- 7. PROCESS RETURNED EMPTIES (DEPOSIT / RETURN) ---
       for (const emptyReturn of reloadRequest.returnedEmpties) {
         if (emptyReturn.quantity <= 0) continue;
-
-        const productRef = adminDb
-          .collection(PRODUCTS_COLLECTION)
-          .doc(emptyReturn.productId);
-        const productDoc = await transaction.get(productRef);
-        const currentEmpty = productDoc.data()?.stockEmpty || 0;
 
         // A) Sumamos al arreglo interno del manifiesto
         const existingEmptyIndex = updatedReturnedEmpties.findIndex(
           (e) => e.productId === emptyReturn.productId,
         );
         if (existingEmptyIndex >= 0) {
-          // Si ya había devuelto de este tipo antes, lo sumamos al total
           updatedReturnedEmpties[existingEmptyIndex].quantityReturned =
             (updatedReturnedEmpties[existingEmptyIndex].quantityReturned || 0) +
             emptyReturn.quantity;
           updatedReturnedEmpties[existingEmptyIndex].quantity =
             updatedReturnedEmpties[existingEmptyIndex].quantityReturned;
         } else {
-          // Si es la primera vez que devuelve este tipo, lo agregamos
           updatedReturnedEmpties.push({
             productId: emptyReturn.productId,
             quantityReturned: emptyReturn.quantity,
@@ -753,12 +819,9 @@ export const dispatchRepository = {
         }
 
         // B) Sumamos al inventario de la Planta
-        const newEmptyStock = currentEmpty + emptyReturn.quantity;
-        productUpdates.push({
-          ref: productRef,
-          field: "stockEmpty",
-          newValue: newEmptyStock,
-        });
+        const prevStock = productStockEmptyRunning[emptyReturn.productId];
+        productStockEmptyRunning[emptyReturn.productId] += emptyReturn.quantity;
+        const newEmptyStock = productStockEmptyRunning[emptyReturn.productId];
 
         // C) Inyectamos el movimiento al Kardex
         kardexEntries.push({
@@ -770,54 +833,62 @@ export const dispatchRepository = {
             quantity: emptyReturn.quantity,
             referenceType: "EMPTY_RETURN_PITSTOP",
             referenceId: manifestId,
-            previousStock: currentEmpty,
+            previousStock: prevStock,
             newStock: newEmptyStock,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            // Nuevos campos
             movementType: "RETURN",
             delta: emptyReturn.quantity,
             resultingBalance: newEmptyStock,
-            userId: currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
+            userId:
+              currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
           },
         });
       }
 
-      // ----------------------------------------------------------------
-      // 4. APLICAR TODAS LAS ACTUALIZACIONES
-      // ----------------------------------------------------------------
-      for (const update of batchUpdates) {
-        transaction.update(update.ref, {
-          currentStock: update.newStock,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-
-      const combinedProductUpdates: Record<string, any> = {};
-      for (const update of productUpdates) {
-        const path = update.ref.path;
-        if (!combinedProductUpdates[path]) {
-          combinedProductUpdates[path] = {
-            ref: update.ref,
-            data: { updatedAt: admin.firestore.FieldValue.serverTimestamp() },
-          };
+      // --- 8. APPLY ALL WRITES ---
+      // Apply batch updates
+      for (const key in batchStockRunning) {
+        const initialStock = batchDocsMap[key].currentStock;
+        const finalStock = batchStockRunning[key];
+        if (finalStock !== initialStock) {
+          transaction.update(batchDocsMap[key].ref, {
+            currentStock: finalStock,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
         }
-        combinedProductUpdates[path].data[update.field] = update.newValue;
-      }
-      for (const key in combinedProductUpdates) {
-        transaction.update(
-          combinedProductUpdates[key].ref,
-          combinedProductUpdates[key].data,
-        );
       }
 
+      // Apply product updates
+      for (const productId of Array.from(productIds)) {
+        const updates: any = {
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        let modified = false;
+        if (productStockFilledRunning[productId] !== productMap[productId].stockFilled) {
+          updates.stockFilled = productStockFilledRunning[productId];
+          modified = true;
+        }
+        if (productStockEmptyRunning[productId] !== productMap[productId].stockEmpty) {
+          updates.stockEmpty = productStockEmptyRunning[productId];
+          modified = true;
+        }
+        if (modified) {
+          transaction.update(
+            adminDb.collection(PRODUCTS_COLLECTION).doc(productId),
+            updates,
+          );
+        }
+      }
+
+      // Set Kardex documents
       for (const entry of kardexEntries) {
         transaction.set(entry.ref, entry.data);
       }
 
-      // 🔥 GUARDAMOS EL HISTORIAL DETALLADO DEL PIT STOP
+      // Guardamos el historial del pit-stop
       const pitStopsHistory = currentManifest.pitStopsHistory || [];
       pitStopsHistory.push({
-        id: adminDb.collection(KARDEX_COLLECTION).doc().id, // ID único interno
+        id: adminDb.collection(KARDEX_COLLECTION).doc().id,
         createdAt: new Date().toISOString(),
         driverId: reloadRequest.driverId || currentManifest.driverId,
         assistantId: reloadRequest.assistantId,
@@ -835,13 +906,13 @@ export const dispatchRepository = {
 
       const manifestUpdates: any = {
         items: updatedItems,
-        returnedEmpties: updatedReturnedEmpties, // <-- Sobrescrito para no duplicar
+        returnedEmpties: updatedReturnedEmpties,
         cashAdvances:
           (currentManifest.cashAdvances || 0) + reloadRequest.cashHandover,
         additionalPettyCash:
           (currentManifest.additionalPettyCash || 0) +
-          reloadRequest.additionalPettyCash, // Mantenemos el acumulado separado del inicial
-        pitStopsHistory: pitStopsHistory, // <-- Inyectamos la bitácora
+          reloadRequest.additionalPettyCash,
+        pitStopsHistory: pitStopsHistory,
         notes: updatedNotes,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };

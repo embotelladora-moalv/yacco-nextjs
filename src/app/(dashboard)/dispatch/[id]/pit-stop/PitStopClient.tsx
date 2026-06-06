@@ -125,6 +125,48 @@ export function PitStopClient({ manifest, products, users, sales }: Props) {
       .map((productId) => ({ productId, quantity: emptiesCount[productId] }));
   }, [sales, manifest.returnedEmpties]);
 
+  const activeLotsOnBoard = useMemo(() => {
+    return (manifest.items || []).map((mItem: any) => {
+      const soldQty = sales.reduce((sum, sale) => {
+        return (
+          sum +
+          (sale.items || []).reduce((acc: number, item: any) => {
+            if (
+              item.productId === mItem.productId &&
+              item.lotNumber === mItem.lotNumber &&
+              item.itemSaleType !== "BOTTLE"
+            ) {
+              return acc + (item.quantity || 0);
+            }
+            return acc;
+          }, 0)
+        );
+      }, 0);
+
+      const maxAvailable =
+        (mItem.quantityLoaded || 0) -
+        (mItem.quantityReturnedFull || 0) -
+        (mItem.wasteQuantity || 0) -
+        soldQty;
+
+      return {
+        productId: mItem.productId,
+        lotNumber: mItem.lotNumber,
+        maxAvailable: Math.max(0, maxAvailable),
+        productName: products.find((p) => p.id === mItem.productId)?.name || "Producto",
+        productSku: products.find((p) => p.id === mItem.productId)?.sku || "SKU",
+      };
+    }).filter((lot: any) => lot.maxAvailable > 0);
+  }, [manifest.items, sales, products]);
+
+  const defaultReturnedFulls = useMemo(() => {
+    return activeLotsOnBoard.map((lot: any) => ({
+      productId: lot.productId,
+      lotNumber: lot.lotNumber,
+      quantity: 0,
+    }));
+  }, [activeLotsOnBoard]);
+
   const form = useForm<AdvancedPitStopFormValues>({
     resolver: zodResolver(advancedPitStopSchema) as any,
     defaultValues: {
@@ -133,7 +175,7 @@ export function PitStopClient({ manifest, products, users, sales }: Props) {
       cashHandover: 0,
       additionalPettyCash: 0,
       returnedEmpties: suggestedEmpties,
-      returnedFulls: [],
+      returnedFulls: defaultReturnedFulls,
       newItems: [],
       notes: "",
     },
@@ -146,8 +188,6 @@ export function PitStopClient({ manifest, products, users, sales }: Props) {
   } = useFieldArray({ control: form.control, name: "returnedEmpties" });
   const {
     fields: fullFields,
-    append: appendFull,
-    remove: removeFull,
   } = useFieldArray({ control: form.control, name: "returnedFulls" });
   const {
     fields: newFields,
@@ -181,10 +221,13 @@ export function PitStopClient({ manifest, products, users, sales }: Props) {
     setIsPending(true);
     for (const fullReturn of values.returnedFulls) {
       if (fullReturn.productId && fullReturn.quantity > 0) {
-        const maxDisp = fullsOnBoard[fullReturn.productId]?.total || 0;
+        const lotInfo = activeLotsOnBoard.find(
+          (l: any) => l.productId === fullReturn.productId && l.lotNumber === fullReturn.lotNumber
+        );
+        const maxDisp = lotInfo?.maxAvailable || 0;
         if (fullReturn.quantity > maxDisp) {
           toast.error("Error de Inventario", {
-            description: `Intentas devolver más ${products.find((p) => p.id === fullReturn.productId)?.name} de los que hay a bordo.`,
+            description: `Intentas devolver más unidades del lote ${fullReturn.lotNumber} de las que hay a bordo.`,
           });
           setIsPending(false);
           return;
@@ -567,74 +610,53 @@ export function PitStopClient({ manifest, products, users, sales }: Props) {
                 <Label className="font-black text-slate-800 text-xs uppercase tracking-wider">
                   Llenos Devueltos (Reingresan a Stock)
                 </Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => appendFull({ productId: "", quantity: 1 })}
-                  className="h-7 text-xs font-bold text-orange-700 hover:bg-orange-100"
-                >
-                  <Plus className="h-3 w-3 mr-1" /> Añadir
-                </Button>
               </div>
               <div className="space-y-4 pt-2">
                 {fullFields.length === 0 && (
                   <p className="text-xs text-slate-500 font-medium text-center py-4 bg-white border rounded-xl">
-                    Sin devoluciones de llenos.
+                    Sin llenos a bordo disponibles para descargar.
                   </p>
                 )}
                 {fullFields.map((field, idx) => {
-                  const selectedProductId = form.watch(
-                    `returnedFulls.${idx}.productId`,
+                  const lotInfo = activeLotsOnBoard.find(
+                    (l: any) => l.productId === field.productId && l.lotNumber === field.lotNumber
                   );
-                  const maxAvailable =
-                    fullsOnBoard[selectedProductId]?.total || 0;
+                  const maxAvailable = lotInfo?.maxAvailable || 0;
                   const isOverStock =
                     Number(form.watch(`returnedFulls.${idx}.quantity`)) >
                     maxAvailable;
                   return (
                     <div
                       key={field.id}
-                      className={`flex gap-2 items-center p-2 rounded-xl border shadow-sm transition-all ${isOverStock ? "bg-red-50 border-red-300" : "bg-white border-slate-200"}`}
+                      className={`flex gap-3 items-center p-3 rounded-xl border shadow-sm transition-all bg-white border-slate-200 ${isOverStock ? "bg-red-50 border-red-300" : ""}`}
                     >
-                      <select
-                        {...form.register(
-                          `returnedFulls.${idx}.productId` as const,
-                        )}
-                        className="flex-1 h-10 px-2 rounded-lg border-none text-xs font-bold bg-slate-50 focus:outline-none"
-                      >
-                        <option value="">Seleccione Producto...</option>
-                        {activeFulls.map((g: any) => (
-                          <option key={g.product.id} value={g.product.id}>
-                            {g.product.name} (Disp: {g.total})
-                          </option>
-                        ))}
-                      </select>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-slate-700 truncate">
+                          {lotInfo?.productName}
+                        </p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase">
+                          Lote: {field.lotNumber} | Disp: {maxAvailable} u.
+                        </p>
+                      </div>
+                      <input
+                        type="hidden"
+                        {...form.register(`returnedFulls.${idx}.productId` as const)}
+                      />
+                      <input
+                        type="hidden"
+                        {...form.register(`returnedFulls.${idx}.lotNumber` as const)}
+                      />
                       <div className="relative">
                         <Input
                           type="number"
-                          min="1"
-                          max={selectedProductId ? maxAvailable : undefined}
+                          min="0"
+                          max={maxAvailable}
                           {...form.register(
                             `returnedFulls.${idx}.quantity` as const,
                           )}
-                          className={`w-20 h-10 text-center font-black bg-slate-50 border-none ${isOverStock ? "text-red-600" : ""}`}
+                          className={`w-24 h-10 text-center font-black bg-slate-50 border-none ${isOverStock ? "text-red-600" : "text-orange-700"}`}
                         />
-                        {selectedProductId && (
-                          <span className="absolute -bottom-4 left-0 right-0 text-center text-[9px] font-black text-orange-500">
-                            Max: {maxAvailable}
-                          </span>
-                        )}
                       </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeFull(idx)}
-                        className="h-10 w-10 text-red-500 hover:bg-red-50 rounded-lg shrink-0"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
                     </div>
                   );
                 })}
@@ -678,8 +700,8 @@ export function PitStopClient({ manifest, products, users, sales }: Props) {
                 >
                   <option value="">¿Qué producto sube?</option>
                   {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
+                    <option key={p.id} value={p.id} disabled={p.stockFilled <= 0}>
+                      {p.name} (Stock: {p.stockFilled})
                     </option>
                   ))}
                 </select>
