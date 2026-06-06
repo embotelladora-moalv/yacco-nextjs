@@ -71,7 +71,7 @@ src/
 ├── core/                        # Capa de dominio
 │   ├── entities/                # Interfaces de dominio
 │   ├── validations/             # Schemas Zod
-│   ├── use-cases/               # ⚠️ Vacío (Clean Arch a medias)
+│   ├── use-cases/               # Casos de uso de negocio (sales/saleReversal, customers/containerAdjustment)
 │   └── utils/
 ├── services/
 │   ├── firebase/                # admin.ts, auth.ts, config.ts
@@ -123,24 +123,34 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 
 ### Avances recientes
 
-- **Migración app viejo COMPLETA y verificada**: 21k docs migrados, 0 huérfanos. Data sucia conocida: 367 clientes con `documentId="123"` (placeholder viejo) pendientes de DNI real.
-- **Geo**: Links de Google Maps parseados a coordenadas geográficas en los clientes.
-- **Lectura escalable**: Implementado patrón (cursor + `count()` + `.select()` + Algolia) en todas las colecciones. En kardex: saldo materializado, log + saldo en la misma transacción.
-- **Colecciones renombradas a camelCase**: `financeCategories`, `shrinkageReasons` y `settingsCategories` migradas. Regla de usar camelCase estrictamente para colecciones y subcolecciones fijada en directivas.
-- **Limpieza**: Productos inactivos borrados de la base de datos, nombres de clientes convertidos a UPPERCASE y `containerBalances` reseteados a 0.
-- **Saldo inicial de stock sembrado**: Sembrado en BD para 5 SKUs de bidones llenos.
-- **hasTap configurable por empaque** + informe de stock en planta.
-- **Trazabilidad de lote FEFO híbrido COMPLETA**: Soporte en planta + ruta + maquila. Vencimiento del lote por defecto a +6 meses (editable), y visualización en `/inventory/report/lots`. Reconciliación: 0 descuadres (descuento atómico en la misma transacción).
-- **Fix de serialización de Timestamp (BUG-12)**: Resuelto en `sales/new`, pit-stop y `collections/pay`.
-- **Refactorización de botones de producción**: Se agruparon las acciones y modales del panel de inventario y producción dentro de un menú unificado ("Acciones de Planta") controlado por estados para mejorar la UX y limpiar la interfaz.
-- **Tarifas y Tipo de Venta en Pedidos**: Se agregaron el tipo de venta por línea (`itemSaleType`) y la descripción a los pedidos (`orderItemSchema` y entidad `OrderItem`). Se implementó reactividad de precios y tarifas personalizadas por cliente en el formulario de pedidos (`OrderForm.tsx`) replicando la lógica en memoria de `SaleForm.tsx`.
+- **Trazabilidad de envases (3 fases) COMPLETA**:
+  - Colección `customerContainerLogs` (`type`: `SALE`/`DELIVERY`/`ADJUSTMENT`/`REVERSAL`).
+  - **Fase 1**: Escritura automática de logs en ventas y entregas en ruta.
+  - **Fase 2**: Ajuste manual de balances absolutos de envases con motivo obligatorio y registro de auditoría, restringido únicamente a usuarios con rol `ADMIN` (`adjustContainerBalancesAction`).
+  - **Fase 3**: Panel consolidado de envases en circulación en el reporte de inventario (`/inventory/report`) con desglose de circulación por producto, ranking de 10 principales deudores y lista de saldos a favor (devoluciones excedentes); además de un extracto de movimientos en la ficha de cada cliente resolviendo nombres de operadores.
+- **Anulación de Ventas (Fase A) COMPLETA**:
+  - Implementación de `cancelSaleAction` y lógica de reversa por contra-asiento.
+  - Marca la venta como `CANCELLED` (no borra física) y realiza la devolución/reversión correspondiente de stock, lotes (reingreso a `productionBatch`), kardex, deuda económica, balances de envases, manifiesto de despacho y estado del pedido.
+  - Bloqueos de seguridad activos: impide anulación de ventas facturadas, en cola de SUNAT, con manifiesto ya liquidado, con pagos aplicados o previamente anuladas.
+- **Testing unitario con Vitest**:
+  - Configuración y montaje de Vitest (`vitest` + `vite-tsconfig-paths`).
+  - Suite de 26 pruebas unitarias robustas en `src/core/use-cases/` para `saleReversal.test.ts` (17 pruebas) y `containerAdjustment.test.ts` (9 pruebas).
+  - Scripts configurados: `npm run test` y `npm run test:watch`.
+- **Precios unitarios centralizados a 4 decimales**: Centralización en `core/utils/priceConfig` (`priceField` y `PRICE_STEP` a `0.0001`) para evitar errores de redondeo; la visualización de caja se conserva en 2 decimales.
+- **Pedidos**: Tipo de venta por línea (`REFILL`/`FULL`/`BOTTLE`) con tarifas personalizadas por cliente; se establece la sede principal (`isMain`/`isDefault`) y tipo `REFILL` por defecto.
+- **Pit-stop de ruta**: Fix de descuadres de stock (se aplican deltas acumulados en lugar de sobrescribir con valores absolutos), devolución de llenos por lote (permite corregir lotes erróneos y reingresar stock a su respectivo `productionBatch`) y actualización de la tarjeta de despacho mostrando ventas, cargas y stock a bordo en tiempo real.
+- **Auditoría con usuarios reales**: Inyección del `userId` real del operador obtenido de la sesión activa (`getUserSession()`) en kardex y transacciones de inventario, eliminando los placeholders `ADMIN_ID`/`ADMIN_PLANT`.
+- **confirmOrderDeliveryAction**: Migrada a transacción atómica; ahora actualiza correctamente los campos `containerBalances` y `debtAmount`.
+- **Normalización de fines de línea**: Se agregó el archivo `.gitattributes` en la raíz para normalizar EOL (LF/CRLF) y evitar ruidos masivos en commits.
+- **Migración app viejo COMPLETA**: 21k docs migrados, 0 huérfanos.
+- **hasTap configurable por empaque**: Configuración de `hasTap` (`true`/`false`/`null`) y reportes en planta asociados.
 
 ### Pendientes siguientes
 
-- **Trabajo local NO pusheado a origin**: Toda la sesión está únicamente en la rama local `develop`.
+- 🚨 **DESPLEGAR ÍNDICES FIRESTORE (BLOQUEANTE)**: Varios filtros y consultas no funcionarán en base de datos real hasta ejecutar `firebase deploy --only firestore:indexes`. Afecta filtros de ventas anuladas (`status+createdAt`) e historial de envases (`customerId+createdAt`).
+- 🚨 **Fase B de Anulaciones (Nota de Crédito/Baja)**: Anulación de ventas ya facturadas mediante la emisión de Nota de Crédito (tipo 07) o Baja formal de Boletas/Facturas ante SUNAT.
+- **Trabajo local NO pusheado a origin**: Toda la sesión está únicamente en la rama local `develop` y ramas de la sesión debido a restricciones de credenciales del agente.
 - Reimport de DNIs (Prompt D) cuando el Excel esté lleno.
-- Deploy de índices Firestore acumulados (varias ramas agregaron índices y deben consolidarse con `firebase deploy --only firestore:indexes`).
-- Informe de bidones en clientes (espera reacumular `containerBalances` tras reset).
 - Rellenar placeholders de la documentación académica (`docs/proyecto/`).
 - Bugs críticos vigentes: BUG-02 (fecha GRE), BUG-03 (worker SUNAT real), BUG-04 (seed).
 
@@ -152,11 +162,10 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 
 ### Deuda relevante
 
-- `core/use-cases/` vacío — Clean Architecture incompleta.
-- 63 ocurrencias de `as any` en el proyecto.
+- Ocurrencias de `as any` en el proyecto (reducidas sustancialmente esta sesión).
+- Cobertura de tests unitarios inicial (26 tests unitarios montados en Vitest), requiere expandirse a otros casos de uso.
 - `CustomerLocation` duplicado en `Customer.ts` y `CRM.ts` con shapes distintos.
 - URL de SUNAT BETA hardcodeada en 3 archivos (debería ser env var).
-- Sin tests.
 
 ### Lo que está bien (no romper)
 
