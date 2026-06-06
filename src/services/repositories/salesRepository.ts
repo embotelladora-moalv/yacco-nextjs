@@ -3,6 +3,12 @@ import { Sale, Customer, CustomerContainerBalance, SaleItem } from "@/core/entit
 import { DispatchManifest } from "@/core/entities/Dispatch";
 import { SaleFormValues } from "@/core/validations/crmSchemas";
 import { adminDb } from "@/services/firebase/admin";
+import {
+  calculateInverseContainerDeltas,
+  applyContainerDeltas,
+  calculateDebtToReverse,
+  reverseManifestItems,
+} from "@/core/use-cases/sales/saleReversal";
 import { serializeFirestoreData } from "@/services/firebase/serialization";
 import { paginate } from "./_pagination";
 
@@ -1137,40 +1143,19 @@ export const salesRepository = {
       }
 
       // 1. CÁLCULO DE REVERSA DE ENVASES
-      const deltaMap = new Map<string, number>();
-      (saleData.items || []).forEach((item) => {
-        deltaMap.set(item.productId, (deltaMap.get(item.productId) || 0) - item.quantity);
-      });
-      (saleData.returnedEmpties || []).forEach((empty) => {
-        deltaMap.set(empty.productId, (deltaMap.get(empty.productId) || 0) + empty.quantity);
-      });
-
-      const containerDeltas = Array.from(deltaMap.entries())
-        .map(([productId, delta]) => ({ productId, delta }))
-        .filter((x) => x.delta !== 0);
+      const containerDeltas = calculateInverseContainerDeltas(
+        saleData.items || [],
+        saleData.returnedEmpties || []
+      );
 
       const customerData = customerDoc.data() as Customer;
-      const currentBalances = customerData.containerBalances || [];
-      const newBalanceMap = new Map<string, number>();
-
-      currentBalances.forEach((b) => newBalanceMap.set(b.productId, b.balance));
-      deltaMap.forEach((delta, productId) => {
-        const current = newBalanceMap.get(productId) || 0;
-        newBalanceMap.set(productId, current + delta);
-      });
-
-      const newContainerBalances = Array.from(newBalanceMap.entries())
-        .map(([productId, balance]) => ({ productId, balance }));
+      const newContainerBalances = applyContainerDeltas(
+        customerData.containerBalances || [],
+        containerDeltas
+      );
 
       // 2. CÁLCULO DE REVERSA DE DEUDA
-      const totalPaid = (saleData.cashReceived || 0) + (saleData.digitalReceived || 0);
-      const originalDebtAdded = saleData.paymentMethod === "CREDIT"
-        ? saleData.totalAmount
-        : Math.max(0, saleData.totalAmount - totalPaid);
-
-      const debtToSubtract = saleData.remainingBalance !== undefined
-        ? saleData.remainingBalance
-        : originalDebtAdded;
+      const debtToSubtract = calculateDebtToReverse(saleData);
 
       // 3. ESCRITURAS COMUNES
       transaction.update(saleRef, {
@@ -1300,21 +1285,10 @@ export const salesRepository = {
         } else {
           // ROUTE-directa
           const manifestData = manifestDoc!.data() as DispatchManifest;
-          const manifestItems = [...(manifestData.items || [])];
-
-          saleData.items.forEach((saleItem) => {
-            const idx = manifestItems.findIndex(
-              (mItem) =>
-                mItem.productId === saleItem.productId &&
-                mItem.lotNumber === saleItem.lotNumber
-            );
-            if (idx >= 0) {
-              manifestItems[idx].quantitySold = Math.max(
-                0,
-                (manifestItems[idx].quantitySold || 0) - saleItem.quantity
-              );
-            }
-          });
+          const manifestItems = reverseManifestItems(
+            manifestData.items || [],
+            saleData.items || []
+          );
 
           const newCashExpected = Math.max(
             0,
