@@ -123,31 +123,25 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 
 ### Avances recientes
 
-- **Migración app viejo -> nuevo COMPLETA y verificada**: 21.213 docs, 0 huérfanos, tipos OK. Data sucia heredada conocida: 367 clientes con `documentId="123"` (placeholder viejo) pendientes de DNI/RUC real; 2 `debtAmount` negativos ~0 (float, inocuos).
-- **Export Excel de clientes sin DNI**: `scripts/migration/export-missing-dni.ts`.
-- **Patrón de lectura escalable implementado** (cursor + `count()` + `.select()` + Algolia) en clientes, ventas, pedidos, deudas, inventario, despacho. Helper: `services/repositories/_pagination.ts`. Doc: `docs/PATRON-LECTURA.md`.
-- **kardex_logs**: saldo materializado en `products` + log con `resultingBalance`, escritura log+saldo en misma transacción. NUNCA sumar historial pa stock.
-- **Geolocalización de clientes**: Extracción de lat/lng de enlaces de Google Maps (resolución de enlaces acortados `maps.app.goo.gl` con rate-limit y caché local, parser con prioridad pin > cámara > query). Actualizados 476 clientes con coordenadas y metadatos (`geoSource`, `geoStatus`) en Firestore.
-- **Convención reforzada**: código en inglés, UI en español.
-- **Doc académica I-VIII generada** en `docs/proyecto/` (con placeholders).
-- **Atributo `hasTap` e Informe de Planta**: Se agregó el campo opcional/nullable `hasTap` (boolean) en la entidad `Product` para indicar si un envase/bidón tiene caño o no, configurable en el formulario de producto. Se implementó la página de reporte `/inventory/report` para desglosar el stock de envases en planta (llenos y vacíos) con y sin caño. Queda pendiente integrar los saldos de envases en clientes.
-- **Trazabilidad de Lotes end-to-end con FEFO híbrido** (branch `feat/lot-traceability-fefo`):
-  - `ProductionBatch` ahora tiene `expirationDate` (default: +6 meses, editable).
-  - **Ventas en Planta**: consumen batch `currentStock` automáticamente por FEFO (primero en vencer, primero en salir). Si un ítem abarca múltiples lotes, la venta se registra con líneas separadas por lote en `Sale.items`.
-  - **Ventas en Ruta**: consumen del inventario cargado en el `DispatchManifest`. Se aplica FEFO sobre los lotes cargados en camión consultando `expirationDate` de `productionBatches`. Actualizan `quantitySold` en el manifiesto.
-  - **Productos Maquila** (`Product.isMaquila === true`): requieren selección manual de lote en el formulario de venta en planta (dropdown morado). Backend valida que el `lotNumber` sea proporcionado y descuenta únicamente de ese batch.
-  - `SaleItem.lotNumber` y `KardexLog.lotNumber` guardan el lote asociado en cada movimiento.
-  - Reporte de stock por lote en `/inventory/report/lots` muestra: lotNumber, fechas, estado (Vigente/Por Vencer/Vencido), stock vivo, consumido.
-  - Scripts de backfill: `scripts/backfill/expiration-date.ts`, `scripts/backfill/verify-batch-discrepancies.ts`, `scripts/backfill/create-historical-batches.ts`.
-  - **REGLA CRÍTICA**: `productionBatches.currentStock` se descuenta atómicamente en la misma transacción que actualiza `products.stockFilled`. Ambos deben estar siempre sincronizados.
+- **Migración app viejo COMPLETA y verificada**: 21k docs migrados, 0 huérfanos. Data sucia conocida: 367 clientes con `documentId="123"` (placeholder viejo) pendientes de DNI real.
+- **Geo**: Links de Google Maps parseados a coordenadas geográficas en los clientes.
+- **Lectura escalable**: Implementado patrón (cursor + `count()` + `.select()` + Algolia) en todas las colecciones. En kardex: saldo materializado, log + saldo en la misma transacción.
+- **Colecciones renombradas a camelCase**: `financeCategories`, `shrinkageReasons` y `settingsCategories` migradas. Regla de usar camelCase estrictamente para colecciones y subcolecciones fijada en directivas.
+- **Limpieza**: Productos inactivos borrados de la base de datos, nombres de clientes convertidos a UPPERCASE y `containerBalances` reseteados a 0.
+- **Saldo inicial de stock sembrado**: Sembrado en BD para 5 SKUs de bidones llenos.
+- **hasTap configurable por empaque** + informe de stock en planta.
+- **Trazabilidad de lote FEFO híbrido COMPLETA**: Soporte en planta + ruta + maquila. Vencimiento del lote por defecto a +6 meses (editable), y visualización en `/inventory/report/lots`. Reconciliación: 0 descuadres (descuento atómico en la misma transacción).
+- **Fix de serialización de Timestamp (BUG-12)**: Resuelto en `sales/new`, pit-stop y `collections/pay`.
+- **Refactorización de botones de producción**: Se agruparon las acciones y modales del panel de inventario y producción dentro de un menú unificado ("Acciones de Planta") controlado por estados para mejorar la UX y limpiar la interfaz.
 
 ### Pendientes siguientes
 
+- **Trabajo local NO pusheado a origin**: Toda la sesión está únicamente en la rama local `develop`.
 - Reimport de DNIs (Prompt D) cuando el Excel esté lleno.
-- Backfill kardex si el saldo materializado no existía (dry-run primero).
-- Deploy índices: `firebase deploy --only firestore:indexes`.
-- Rellenar placeholders doc académica (`docs/proyecto/PENDIENTES.md`).
-- Bugs críticos vigentes: BUG-02 (fecha GRE), BUG-03 (worker real), BUG-04 (seed).
+- Deploy de índices Firestore acumulados (varias ramas agregaron índices y deben consolidarse con `firebase deploy --only firestore:indexes`).
+- Informe de bidones en clientes (espera reacumular `containerBalances` tras reset).
+- Rellenar placeholders de la documentación académica (`docs/proyecto/`).
+- Bugs críticos vigentes: BUG-02 (fecha GRE), BUG-03 (worker SUNAT real), BUG-04 (seed).
 
 ### Críticos pendientes (Sprint 1)
 
