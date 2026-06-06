@@ -4,6 +4,7 @@ import { Customer } from "@/core/entities/CRM";
 import { serializeFirestoreData } from "@/services/firebase/serialization";
 import { customerSearchService } from "../search/customerSearchService";
 import { paginate } from "./_pagination";
+import { calculateAdjustmentDeltas, mergeBalances } from "@/core/use-cases/customers/containerAdjustment";
 
 const CUSTOMERS_COLLECTION = "customers";
 
@@ -299,5 +300,56 @@ export const customerRepository = {
       totalCount,
       totalDebtAmount,
     };
+  },
+
+  async adjustContainerBalances(
+    customerId: string,
+    newBalances: { productId: string; balance: number }[],
+    reason: string,
+    userId: string
+  ): Promise<void> {
+    const customerRef = adminDb.collection(CUSTOMERS_COLLECTION).doc(customerId);
+
+    await adminDb.runTransaction(async (transaction) => {
+      const customerDoc = await transaction.get(customerRef);
+      if (!customerDoc.exists) {
+        throw new Error("El cliente no existe.");
+      }
+
+      const customerData = customerDoc.data() as Customer;
+      const currentBalances = customerData.containerBalances || [];
+
+      // 1. Calcular deltas usando la función pura
+      const containerDeltas = calculateAdjustmentDeltas(currentBalances, newBalances);
+
+      if (containerDeltas.length === 0) {
+        throw new Error("No hay cambios en los saldos.");
+      }
+
+      // 2. Fusionar saldos usando la función pura
+      const balancesFinales = mergeBalances(currentBalances, newBalances);
+
+      // 3. Escrituras
+      transaction.update(customerRef, {
+        containerBalances: balancesFinales,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      const containerLogRef = adminDb.collection("customerContainerLogs").doc();
+      transaction.set(containerLogRef, {
+        id: containerLogRef.id,
+        customerId,
+        type: "ADJUSTMENT",
+        delta: containerDeltas,
+        detail: {
+          items: [],
+          returnedEmpties: [],
+        },
+        balanceAfter: balancesFinales,
+        reason,
+        userId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
   },
 };

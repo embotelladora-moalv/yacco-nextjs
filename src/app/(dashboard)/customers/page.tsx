@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Plus, Users } from "lucide-react";
 import Link from "next/link";
 import { inventoryRepository } from "@/services/repositories/inventoryRepository";
+import { getUserSession } from "@/services/firebase/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -26,16 +27,18 @@ export default async function CustomersPage({ searchParams }: PageProps) {
   const cursorArray = cursorsParam ? cursorsParam.split(",") : [];
   const currentCursor = cursorArray[cursorArray.length - 1];
 
-  const [paginatedData, products] = await Promise.all([
+  const [paginatedData, products, session] = await Promise.all([
     customerRepository.listPaginated({
       pageSize: limit,
       cursor: currentCursor,
       search: q,
     }),
     inventoryRepository.getAllProducts(),
+    getUserSession(),
   ]);
 
   const { items: customers, nextCursor, hasMore, totalCount } = paginatedData;
+  const isAdmin = session?.roles?.includes("ADMIN") ?? false;
 
   return (
     <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4 sm:px-6 space-y-8">
@@ -71,6 +74,7 @@ export default async function CustomersPage({ searchParams }: PageProps) {
         currentSearch={q}
         currentCursors={cursorsParam}
         currentLimit={limit}
+        isAdmin={isAdmin}
       />
     </div>
   );
