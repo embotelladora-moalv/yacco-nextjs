@@ -635,50 +635,120 @@ export const salesRepository = {
 
       if (!customerDoc.exists) throw new Error("Cliente no encontrado");
 
-      const pendingQuery = adminDb
-        .collection(SALES_COLLECTION)
-        .where("customerId", "==", data.customerId)
-        .where("status", "==", "COMPLETED")
-        .where("paymentStatus", "in", ["UNPAID", "PARTIAL"])
-        .orderBy("createdAt", "asc");
-
-      const pendingSnap = await transaction.get(pendingQuery);
-
-      let amountToDistribute = data.amount;
       const appliedTo: { saleId: string; amountApplied: number }[] = [];
 
-      for (const doc of pendingSnap.docs) {
-        if (amountToDistribute <= 0) break;
+      if (data.allocationMode === "DIRECTED") {
+        let totalAllocationsSum = 0;
 
-        const sale = doc.data();
-        const currentBalance = sale.remainingBalance ?? sale.totalAmount;
-        let appliedInThisTicket = 0;
+        // 1. Validaciones y lecturas
+        const allocationSaleRefs = (data.allocations || []).map((a: { saleId: string; amount: number }) =>
+          adminDb.collection(SALES_COLLECTION).doc(a.saleId)
+        );
 
-        if (amountToDistribute >= currentBalance) {
-          appliedInThisTicket = currentBalance;
-          amountToDistribute -= currentBalance;
+        const saleDocs = allocationSaleRefs.length > 0
+          ? await transaction.getAll(...allocationSaleRefs)
+          : [];
 
-          transaction.update(doc.ref, {
-            remainingBalance: 0,
-            paymentStatus: "PAID",
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        } else {
-          appliedInThisTicket = amountToDistribute;
-          const newBalance = currentBalance - amountToDistribute;
-          amountToDistribute = 0;
+        for (let i = 0; i < (data.allocations || []).length; i++) {
+          const alloc = data.allocations[i];
+          const saleDoc = saleDocs[i];
 
-          transaction.update(doc.ref, {
-            remainingBalance: newBalance,
-            paymentStatus: "PARTIAL",
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
+          if (!saleDoc || !saleDoc.exists) {
+            throw new Error(`La venta ${alloc.saleId} no existe.`);
+          }
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const sale = saleDoc.data() as any;
+          if (sale.customerId !== data.customerId) {
+            throw new Error(`La venta ${alloc.saleId} no pertenece a este cliente.`);
+          }
+          if (sale.status !== "COMPLETED") {
+            throw new Error(`La venta ${alloc.saleId} no está completada.`);
+          }
+          if (!["UNPAID", "PARTIAL"].includes(sale.paymentStatus)) {
+            throw new Error(`La venta ${alloc.saleId} ya está cobrada o no está pendiente.`);
+          }
+
+          const currentBalance = sale.remainingBalance ?? sale.totalAmount;
+          if (alloc.amount > currentBalance + 0.001) {
+            throw new Error(`El abono asignado (S/ ${alloc.amount}) excede el saldo pendiente (S/ ${currentBalance}) de la venta ${alloc.saleId}.`);
+          }
+
+          totalAllocationsSum += alloc.amount;
         }
 
-        appliedTo.push({
-          saleId: doc.id,
-          amountApplied: appliedInThisTicket,
-        });
+        if (Math.abs(totalAllocationsSum - data.amount) > 0.01) {
+          throw new Error(`La suma de asignaciones (S/ ${totalAllocationsSum.toFixed(2)}) no coincide con el monto total pagado (S/ ${data.amount.toFixed(2)}).`);
+        }
+
+        // 2. Escrituras
+        for (let i = 0; i < (data.allocations || []).length; i++) {
+          const alloc = data.allocations[i];
+          const saleDoc = saleDocs[i];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const sale = saleDoc.data() as any;
+          const currentBalance = sale.remainingBalance ?? sale.totalAmount;
+
+          const newBalance = Math.max(0, currentBalance - alloc.amount);
+          const newStatus = newBalance === 0 ? "PAID" : "PARTIAL";
+
+          transaction.update(saleDoc.ref, {
+            remainingBalance: newBalance,
+            paymentStatus: newStatus,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          appliedTo.push({
+            saleId: alloc.saleId,
+            amountApplied: alloc.amount,
+          });
+        }
+      } else {
+        // MODO FIFO (Comportamiento actual)
+        const pendingQuery = adminDb
+          .collection(SALES_COLLECTION)
+          .where("customerId", "==", data.customerId)
+          .where("status", "==", "COMPLETED")
+          .where("paymentStatus", "in", ["UNPAID", "PARTIAL"])
+          .orderBy("createdAt", "asc");
+
+        const pendingSnap = await transaction.get(pendingQuery);
+
+        let amountToDistribute = data.amount;
+
+        for (const doc of pendingSnap.docs) {
+          if (amountToDistribute <= 0) break;
+
+          const sale = doc.data();
+          const currentBalance = sale.remainingBalance ?? sale.totalAmount;
+          let appliedInThisTicket = 0;
+
+          if (amountToDistribute >= currentBalance) {
+            appliedInThisTicket = currentBalance;
+            amountToDistribute -= currentBalance;
+
+            transaction.update(doc.ref, {
+              remainingBalance: 0,
+              paymentStatus: "PAID",
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          } else {
+            appliedInThisTicket = amountToDistribute;
+            const newBalance = currentBalance - amountToDistribute;
+            amountToDistribute = 0;
+
+            transaction.update(doc.ref, {
+              remainingBalance: newBalance,
+              paymentStatus: "PARTIAL",
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+
+          appliedTo.push({
+            saleId: doc.id,
+            amountApplied: appliedInThisTicket,
+          });
+        }
       }
 
       transaction.update(customerRef, {

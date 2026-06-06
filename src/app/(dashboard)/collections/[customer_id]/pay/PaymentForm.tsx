@@ -45,7 +45,28 @@ const formSchema = paymentBaseSchema
       message: "El banco es obligatorio para transferencias",
       path: ["bankId"],
     }
-  );
+  )
+  .superRefine((data, ctx) => {
+    if (data.allocationMode === "DIRECTED") {
+      const activeAllocations = data.allocations?.filter((a) => a.amount > 0) || [];
+      if (activeAllocations.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Debe asignar al menos una venta con monto mayor a 0 en el modo dirigido",
+          path: ["allocations"],
+        });
+      } else {
+        const sum = activeAllocations.reduce((acc, curr) => acc + curr.amount, 0);
+        if (Math.abs(sum - data.amount) > 0.01) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `La suma de las asignaciones (S/ ${sum.toFixed(2)}) debe ser igual al monto total (S/ ${data.amount.toFixed(2)})`,
+            path: ["amount"],
+          });
+        }
+      }
+    }
+  });
 
 interface PaymentFormProps {
   customer: Customer;
@@ -79,12 +100,46 @@ export function PaymentForm({
       reference: "",
       receivedById: "", // Puede quedar vacío
       notes: "",
+      allocationMode: "FIFO",
+      allocations: [],
     },
   });
 
   const watchAmount = form.watch("amount");
   const watchPaymentMethod = form.watch("paymentMethod");
+  const watchAllocationMode = form.watch("allocationMode");
   const remainingDebt = Math.max(0, currentDebt - (Number(watchAmount) || 0));
+
+  const [directedState, setDirectedState] = useState<
+    Record<string, { checked: boolean; amount: number }>
+  >({});
+
+  const selectedCount = Object.values(directedState).filter((v) => v.checked).length;
+
+  useEffect(() => {
+    if (pendingSales && pendingSales.length > 0) {
+      const initial: Record<string, { checked: boolean; amount: number }> = {};
+      pendingSales.forEach((sale) => {
+        const balance = sale.remainingBalance ?? sale.totalAmount;
+        initial[sale.id] = { checked: false, amount: balance };
+      });
+      setDirectedState(initial);
+    }
+  }, [pendingSales]);
+
+  useEffect(() => {
+    if (watchAllocationMode === "FIFO") {
+      form.setValue("allocations", []);
+      form.setValue("amount", currentDebt);
+      setDirectedState((prev) => {
+        const resetState: Record<string, { checked: boolean; amount: number }> = {};
+        Object.keys(prev).forEach((k) => {
+          resetState[k] = { ...prev[k], checked: false };
+        });
+        return resetState;
+      });
+    }
+  }, [watchAllocationMode, currentDebt, form]);
 
   useEffect(() => {
     if (watchPaymentMethod !== "TRANSFER") {
@@ -93,12 +148,62 @@ export function PaymentForm({
     }
   }, [watchPaymentMethod, form]);
 
+  const handleCheckboxChange = (saleId: string, checked: boolean) => {
+    const nextState = {
+      ...directedState,
+      [saleId]: {
+        ...directedState[saleId],
+        checked,
+      },
+    };
+    setDirectedState(nextState);
+    updateFormAllocations(nextState);
+  };
+
+  const handleAmountChange = (saleId: string, amountVal: number) => {
+    const sale = pendingSales.find((s) => s.id === saleId);
+    if (!sale) return;
+    const max = sale.remainingBalance ?? sale.totalAmount;
+    const clampedAmount = Math.max(0, Math.min(max, amountVal));
+
+    const nextState = {
+      ...directedState,
+      [saleId]: {
+        ...directedState[saleId],
+        amount: clampedAmount,
+      },
+    };
+    setDirectedState(nextState);
+    updateFormAllocations(nextState);
+  };
+
+  const updateFormAllocations = (state: Record<string, { checked: boolean; amount: number }>) => {
+    const activeAllocations = Object.entries(state)
+      .filter(([, val]) => val.checked && val.amount > 0)
+      .map(([saleId, val]) => ({ saleId, amount: val.amount }));
+
+    const sum = activeAllocations.reduce((acc, curr) => acc + curr.amount, 0);
+
+    form.setValue("allocations", activeAllocations);
+    form.setValue("amount", Number(sum.toFixed(2)));
+  };
+
   const onSubmit = async (values: DebtPaymentFormValues) => {
     if (values.amount > currentDebt) {
       toast.error("Monto excedido", {
         description: "No puedes cobrar más de lo que el cliente debe.",
       });
       return;
+    }
+
+    if (values.allocationMode === "DIRECTED") {
+      const activeAllocations = values.allocations?.filter((a) => a.amount > 0) || [];
+      if (activeAllocations.length === 0) {
+        toast.error("Error en pago dirigido", {
+          description: "Debe seleccionar y asignar al menos un ticket con monto mayor a 0.",
+        });
+        return;
+      }
     }
 
     setIsPending(true);
@@ -110,8 +215,12 @@ export function PaymentForm({
     setIsPending(false);
 
     if (result.success) {
+      const descriptionText =
+        values.allocationMode === "DIRECTED"
+          ? `Se aplicó el pago dirigido de S/ ${values.amount.toFixed(2)} a las ventas seleccionadas.`
+          : `Se descontaron S/ ${values.amount.toFixed(2)} de la deuda mediante FIFO.`;
       toast.success("Pago registrado exitosamente", {
-        description: `Se descontaron S/ ${values.amount.toFixed(2)} de la deuda mediante FIFO.`,
+        description: descriptionText,
       });
       router.push("/collections");
       router.refresh();
@@ -188,10 +297,13 @@ export function PaymentForm({
 
           <div className="h-px bg-slate-200 w-full" />
 
-          {/* 2. Detalle de Tickets (FIFO) */}
+          {/* 2. Detalle de Tickets */}
           <div className="space-y-4">
             <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-              <FileText className="h-4 w-4" /> Tickets Pendientes (FIFO)
+              <FileText className="h-4 w-4" />{" "}
+              {watchAllocationMode === "DIRECTED"
+                ? "Ventas Seleccionadas"
+                : "Tickets Pendientes (FIFO)"}
             </h3>
 
             {pendingSales.length === 0 ? (
@@ -199,6 +311,59 @@ export function PaymentForm({
                 <p className="text-xs font-bold text-emerald-600">
                   No hay tickets pendientes.
                 </p>
+              </div>
+            ) : watchAllocationMode === "DIRECTED" ? (
+              <div className="space-y-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                {pendingSales.map((sale) => {
+                  const maxAmount = sale.remainingBalance ?? sale.totalAmount;
+                  const itemState = directedState[sale.id] || { checked: false, amount: maxAmount };
+                  
+                  return (
+                    <div
+                      key={sale.id}
+                      className={`border p-3 rounded-xl shadow-sm transition-all ${
+                        itemState.checked ? "bg-emerald-50/40 border-emerald-300" : "bg-white border-slate-200"
+                      }`}
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={itemState.checked}
+                            onChange={(e) => handleCheckboxChange(sale.id, e.target.checked)}
+                            className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          />
+                          <span className="text-[10px] font-black bg-slate-100 px-2 py-0.5 rounded text-slate-500">
+                            #{sale.id.substring(0, 8).toUpperCase()}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {new Date(sale.createdAt).toLocaleDateString("es-PE")}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center mt-1 gap-2">
+                        <span className="text-xs font-bold text-slate-500">
+                          Saldo: S/ {maxAmount.toFixed(2)}
+                        </span>
+                        
+                        {itemState.checked && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs font-black text-slate-400">S/</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              max={maxAmount}
+                              value={itemState.amount}
+                              onChange={(e) => handleAmountChange(sale.id, Number(e.target.value))}
+                              className="w-20 h-7 text-right text-xs font-bold border border-slate-300 rounded px-1 text-emerald-700 bg-white focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="space-y-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
@@ -226,6 +391,12 @@ export function PaymentForm({
                 ))}
               </div>
             )}
+
+            {watchAllocationMode === "DIRECTED" && selectedCount === 0 && (
+              <p className="text-xs text-red-500 font-bold mt-2">
+                * Debe seleccionar al menos un ticket para pago dirigido.
+              </p>
+            )}
           </div>
         </div>
 
@@ -235,6 +406,36 @@ export function PaymentForm({
           className="p-8 lg:col-span-2 space-y-8 flex flex-col justify-between"
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="space-y-2 sm:col-span-2">
+              <Label className="text-xs font-black text-slate-700 uppercase tracking-widest">
+                Modo de Cobro *
+              </Label>
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => form.setValue("allocationMode", "FIFO")}
+                  className={`py-3 px-4 text-xs font-black rounded-lg transition-all ${
+                    watchAllocationMode === "FIFO"
+                      ? "bg-white text-slate-900 shadow-sm border border-slate-200"
+                      : "text-slate-500 hover:text-slate-800 bg-transparent"
+                  }`}
+                >
+                  Pago a cuenta (FIFO)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => form.setValue("allocationMode", "DIRECTED")}
+                  className={`py-3 px-4 text-xs font-black rounded-lg transition-all ${
+                    watchAllocationMode === "DIRECTED"
+                      ? "bg-white text-slate-900 shadow-sm border border-slate-200"
+                      : "text-slate-500 hover:text-slate-800 bg-transparent"
+                  }`}
+                >
+                  Pago dirigido a tickets
+                </button>
+              </div>
+            </div>
+
             <div className="space-y-2 sm:col-span-2">
               <Label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
                 <BadgeDollarSign className="h-4 w-4 text-emerald-500" /> Monto a
@@ -246,7 +447,12 @@ export function PaymentForm({
                 step="0.10"
                 min="0.1"
                 max={currentDebt}
-                className="h-16 text-3xl font-black text-emerald-600 border-2 border-emerald-100 bg-emerald-50/50 focus:border-emerald-500"
+                readOnly={watchAllocationMode === "DIRECTED"}
+                className={`h-16 text-3xl font-black border-2 bg-emerald-50/50 focus:border-emerald-500 transition-all ${
+                  watchAllocationMode === "DIRECTED"
+                    ? "text-slate-600 border-slate-200 bg-slate-50"
+                    : "text-emerald-600 border-emerald-100"
+                }`}
               />
               {form.formState.errors.amount && (
                 <p className="text-xs text-red-500 font-bold">
@@ -360,14 +566,17 @@ export function PaymentForm({
             </Button>
             <Button
               type="submit"
-              disabled={isPending}
-              className="bg-slate-900 hover:bg-slate-800 text-white font-black px-10 shadow-lg shadow-slate-900/20 h-14 rounded-xl"
+              disabled={isPending || (watchAllocationMode === "DIRECTED" && selectedCount === 0)}
+              className="bg-slate-900 hover:bg-slate-800 text-white font-black px-10 shadow-lg shadow-slate-900/20 h-14 rounded-xl disabled:opacity-50"
             >
               {isPending ? (
                 "Registrando..."
               ) : (
                 <>
-                  <Save className="mr-2 h-5 w-5" /> Aplicar Abono (FIFO)
+                  <Save className="mr-2 h-5 w-5" />{" "}
+                  {watchAllocationMode === "DIRECTED"
+                    ? "Aplicar Abono Dirigido"
+                    : "Aplicar Abono (FIFO)"}
                 </>
               )}
             </Button>

@@ -25,7 +25,7 @@ export function CollectionForm({
   const router = useRouter();
 
   const form = useForm<PaymentFormValues>({
-    resolver: zodResolver(paymentSchema),
+    resolver: zodResolver(paymentSchema) as any,
     defaultValues: {
       customerId: "",
       amount: 0,
@@ -33,6 +33,8 @@ export function CollectionForm({
       paymentMethod: "CASH",
       reference: "",
       notes: "",
+      allocationMode: "FIFO",
+      allocations: [],
     },
   });
 
