@@ -254,7 +254,7 @@ export function ProductionModal({
             <Button
               type="submit"
               disabled={isPending}
-              className="flex-[2] h-12 bg-slate-900 hover:bg-slate-800 font-black text-white rounded-xl shadow-xl transition-all"
+              className="flex-2 h-12 bg-slate-900 hover:bg-slate-800 font-black text-white rounded-xl shadow-xl transition-all"
             >
               {isPending ? "Sincronizando..." : "Confirmar Producción"}
             </Button>

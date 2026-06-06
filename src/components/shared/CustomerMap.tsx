@@ -88,7 +88,7 @@ export default function CustomerMap({ customers }: { customers: Customer[] }) {
   return (
     <div className="relative h-[700px] w-full rounded-3xl overflow-hidden border shadow-2xl">
       {/* PANEL LATERAL DE RUTA */}
-      <div className="absolute top-4 right-4 z-[1000] w-64 bg-white/90 backdrop-blur-md p-4 rounded-2xl border shadow-xl">
+      <div className="absolute top-4 right-4 z-1000 w-64 bg-white/90 backdrop-blur-md p-4 rounded-2xl border shadow-xl">
         <h3 className="text-sm font-black flex items-center gap-2 mb-3">
           <Truck className="h-4 w-4 text-blue-700" /> RUTA ACTUAL (
           {routeIds.length})
