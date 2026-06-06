@@ -34,12 +34,8 @@ import {
 } from "@vis.gl/react-google-maps";
 import { db } from "@/services/firebase/config";
 import {
-  confirmOrderDeliveryAction,
   unassignOrdersBulkAction,
 } from "../../orders/actions";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { RouteTimeline } from "./RouteTimeline";
 
 interface Props {
@@ -63,19 +59,10 @@ export function DispatchDetailsClient({
 }: Props) {
   const [isUnassigning, setIsUnassigning] = useState(false);
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
-  const [isPending, setIsPending] = useState(false);
   const [truckLocation, setTruckLocation] = useState<{
     lat: number;
     lng: number;
   } | null>(null);
-
-  const [saleModalOpen, setSaleModalOpen] = useState(false);
-  const [selectedOrderForSale, setSelectedOrderForSale] = useState<any>(null);
-  const [paymentData, setPaymentData] = useState({
-    method: "CASH",
-    cash: 0,
-    digital: 0,
-  });
 
   useEffect(() => {
     if (manifest.status !== "ON_ROUTE") return;
@@ -208,23 +195,6 @@ export function DispatchDetailsClient({
     } else toast.error("Error", { description: result.error });
   };
 
-  const handleConfirmSale = async () => {
-    if (!selectedOrderForSale) return;
-    setIsPending(true);
-    const result = await confirmOrderDeliveryAction(selectedOrderForSale.id, {
-      method: paymentData.method,
-      cash: paymentData.cash,
-      digital: paymentData.digital,
-      driverId: manifest.driverId,
-      returnedEmpties: [],
-    });
-    setIsPending(false);
-    if (result.success) {
-      toast.success("Entrega confirmada y venta registrada.");
-      setSaleModalOpen(false);
-      setPaymentData({ method: "CASH", cash: 0, digital: 0 });
-    } else toast.error("Error", { description: result.error });
-  };
 
   // 🔥 FORMATO DE FECHA Y HORA
   const dispatchDate = new Date(manifest.dispatchDate);
@@ -679,70 +649,6 @@ export function DispatchDetailsClient({
           )}
         </div>
 
-        <Dialog open={saleModalOpen} onOpenChange={setSaleModalOpen}>
-          <DialogContent className="sm:max-w-md rounded-3xl p-6">
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-                <Store className="h-6 w-6 text-emerald-500" />
-                <h3 className="font-black text-lg text-slate-800">
-                  Confirmar Entrega Rápida
-                </h3>
-              </div>
-              <div className="space-y-3">
-                <Label className="text-xs font-black text-slate-700 uppercase">
-                  Método de Pago
-                </Label>
-                <select
-                  value={paymentData.method}
-                  onChange={(e) =>
-                    setPaymentData({ ...paymentData, method: e.target.value })
-                  }
-                  className="w-full h-11 px-3 rounded-xl border font-bold bg-white focus:outline-none"
-                >
-                  <option value="CASH">Efectivo</option>
-                  <option value="DIGITAL">Digital (Yape/Plin)</option>
-                  <option value="CREDIT">Crédito</option>
-                </select>
-                {paymentData.method !== "CREDIT" && (
-                  <div>
-                    <Label className="text-xs font-black text-slate-700 uppercase mt-2">
-                      Monto
-                    </Label>
-                    <div className="relative mt-1">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">
-                        S/
-                      </span>
-                      <Input
-                        type="number"
-                        value={
-                          paymentData.method === "CASH"
-                            ? paymentData.cash
-                            : paymentData.digital
-                        }
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setPaymentData({
-                            ...paymentData,
-                            cash: paymentData.method === "CASH" ? val : 0,
-                            digital: paymentData.method === "DIGITAL" ? val : 0,
-                          });
-                        }}
-                        className="pl-8 h-11 font-black text-lg bg-emerald-50 border-emerald-200 text-emerald-800 focus-visible:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-              <Button
-                disabled={isPending}
-                onClick={handleConfirmSale}
-                className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-base mt-4 rounded-xl shadow-lg"
-              >
-                {isPending ? "Procesando..." : "Confirmar Venta"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </div>
     </APIProvider>
   );
