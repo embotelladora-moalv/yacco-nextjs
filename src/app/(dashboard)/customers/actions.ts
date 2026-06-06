@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 import { randomUUID } from "crypto";
 // IMPORTANTE: Asegúrate de importar tu configuración de admin
 import { adminStorage } from "@/services/firebase/admin";
+import { getUserSession } from "@/services/firebase/auth";
 
 export async function saveCustomerAction(
   data: CustomerFormValues,
@@ -138,5 +139,40 @@ export async function toggleCustomerStatusAction(
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message };
+  }
+}
+
+export async function adjustContainerBalancesAction(
+  customerId: string,
+  newBalances: { productId: string; balance: number }[],
+  reason: string,
+) {
+  try {
+    const session = await getUserSession();
+    if (!session) {
+      return { success: false, error: "Sesión inválida. Vuelve a iniciar sesión." };
+    }
+
+    if (!session.roles.includes("ADMIN")) {
+      return { success: false, error: "No tiene permisos para ajustar envases." };
+    }
+
+    if (!reason || !reason.trim()) {
+      return { success: false, error: "El motivo del ajuste es obligatorio." };
+    }
+
+    await customerRepository.adjustContainerBalances(
+      customerId,
+      newBalances,
+      reason.trim(),
+      session.uid
+    );
+
+    revalidatePath("/customers");
+    return { success: true };
+  } catch (error) {
+    const err = error as Error;
+    console.error("Error al ajustar envases:", err);
+    return { success: false, error: err.message || "Error al procesar el ajuste de envases." };
   }
 }

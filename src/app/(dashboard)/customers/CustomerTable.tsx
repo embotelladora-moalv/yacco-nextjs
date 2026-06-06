@@ -41,6 +41,7 @@ import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
+import { adjustContainerBalancesAction } from "./actions";
 
 interface CustomerTableProps {
   initialCustomers: Customer[];
@@ -51,6 +52,7 @@ interface CustomerTableProps {
   currentSearch: string;
   currentCursors: string;
   currentLimit: number;
+  isAdmin: boolean;
 }
 
 export function CustomerTable({
@@ -62,6 +64,7 @@ export function CustomerTable({
   currentSearch,
   currentCursors,
   currentLimit,
+  isAdmin,
 }: CustomerTableProps) {
   // --- NAVEGACIÓN Y SEARCH ROUTER ---
   const router = useRouter();
@@ -114,6 +117,7 @@ export function CustomerTable({
   const [containerAdjustments, setContainerAdjustments] = useState<
     Record<string, number>
   >({});
+  const [adjustReason, setAdjustReason] = useState("");
 
   // Cierra popup de filtros al hacer clic fuera
   useEffect(() => {
@@ -242,6 +246,7 @@ export function CustomerTable({
       initialBalances[p.id] = match ? Number(match.balance) : 0;
     });
     setContainerAdjustments(initialBalances);
+    setAdjustReason("");
     setModalType("ENVASES");
   };
 
@@ -261,13 +266,32 @@ export function CustomerTable({
 
   const handleSaveContainers = async () => {
     if (!selectedCustomer) return;
+    if (!adjustReason || !adjustReason.trim()) {
+      toast.error("El motivo del ajuste es obligatorio.");
+      return;
+    }
     setIsSubmittingModal(true);
     try {
-      // Aquí mapeas el objeto containerAdjustments y llamas a tu backend/repository
-      toast.success("Inventario inicial de envases sincronizado con éxito");
-      setModalType("NONE");
-    } catch {
-      toast.error("Error al procesar el ajuste");
+      const newBalances = Object.entries(containerAdjustments).map(([productId, balance]) => ({
+        productId,
+        balance,
+      }));
+      const result = await adjustContainerBalancesAction(
+        selectedCustomer.id,
+        newBalances,
+        adjustReason.trim()
+      );
+      if (result.success) {
+        toast.success("Inventario de envases ajustado con éxito");
+        setModalType("NONE");
+        setAdjustReason("");
+        router.refresh();
+      } else {
+        toast.error(result.error || "Error al procesar el ajuste");
+      }
+    } catch (error) {
+      const err = error as Error;
+      toast.error(err.message || "Error al procesar el ajuste");
     } finally {
       setIsSubmittingModal(false);
     }
@@ -606,13 +630,15 @@ export function CustomerTable({
                           </DropdownMenuItem>
 
                           {/* 🔥 CAMBIO: Modals Dinámicos disparados inline desde la propia tabla */}
-                          <DropdownMenuItem
-                            onClick={() => handleOpenEnvasesModal(customer)}
-                            className="rounded-xl cursor-pointer hover:bg-slate-50 font-bold text-slate-600 text-xs"
-                          >
-                            <ArrowRightLeft className="mr-2 h-4 w-4 text-amber-500" />{" "}
-                            Ajustar Envases (Migración)
-                          </DropdownMenuItem>
+                          {isAdmin && (
+                            <DropdownMenuItem
+                              onClick={() => handleOpenEnvasesModal(customer)}
+                              className="rounded-xl cursor-pointer hover:bg-slate-50 font-bold text-slate-600 text-xs"
+                            >
+                              <ArrowRightLeft className="mr-2 h-4 w-4 text-amber-500" />{" "}
+                              Ajustar Envases (Migración)
+                            </DropdownMenuItem>
+                          )}
 
                           <DropdownMenuItem
                             onClick={() => handleOpenDeudaModal(customer)}
@@ -686,10 +712,10 @@ export function CustomerTable({
                 <ArrowRightLeft className="h-5 w-5 text-amber-400" />
                 <div>
                   <h3 className="font-black text-sm uppercase tracking-wider">
-                    Envases de Migración
+                    Ajustar Envases del Cliente
                   </h3>
                   <p className="text-[11px] text-slate-300 font-medium">
-                    Establecer stock en posesión de: {selectedCustomer.name}
+                    Corrige o establece los envases en posesión de: {selectedCustomer.name}
                   </p>
                 </div>
               </div>
@@ -703,9 +729,8 @@ export function CustomerTable({
 
             <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
               <p className="text-xs text-slate-500 font-medium">
-                Modifique los saldos de envases que este distribuidor o negocio
-                ya tiene en su poder antes de iniciar operaciones en la
-                plataforma:
+                Modifique los saldos de envases que este cliente tiene en su poder.
+                Se registrará un historial detallado del ajuste.
               </p>
               {products
                 .filter((p) => p.isReturnableContainer)
@@ -739,6 +764,20 @@ export function CustomerTable({
                     </div>
                   </div>
                 ))}
+
+              <div className="space-y-2 pt-4 border-t border-slate-100">
+                <Label htmlFor="adjust-reason" className="text-xs font-black text-slate-500 uppercase tracking-wider">
+                  Motivo del ajuste (Obligatorio)
+                </Label>
+                <textarea
+                  id="adjust-reason"
+                  rows={3}
+                  placeholder="Ej: corrección, el repartidor olvidó anotar 3 vacíos devueltos el 03/06..."
+                  value={adjustReason}
+                  onChange={(e) => setAdjustReason(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-800 transition-all resize-none"
+                />
+              </div>
             </div>
 
             <div className="p-4 bg-slate-50 border-t flex justify-end gap-2">
@@ -751,7 +790,7 @@ export function CustomerTable({
                 Cancelar
               </Button>
               <Button
-                disabled={isSubmittingModal}
+                disabled={isSubmittingModal || !adjustReason.trim()}
                 size="sm"
                 className="bg-slate-900 text-white font-black px-6"
                 onClick={handleSaveContainers}
