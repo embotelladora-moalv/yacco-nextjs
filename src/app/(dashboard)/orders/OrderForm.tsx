@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createOrderAction, updateOrderAction } from "./actions";
@@ -22,6 +22,7 @@ import {
 import { Customer } from "@/core/entities/CRM";
 import { Product } from "@/core/entities/Inventory";
 import { OrderFormValues, orderSchema } from "@/core/validations/orderSchema";
+import { PRICE_STEP } from "@/core/utils/priceConfig";
 
 interface OrderFormProps {
   customers: Customer[];
@@ -45,7 +46,7 @@ export function OrderForm({
     defaultValues: initialData || {
       customerId: "",
       locationId: "",
-      items: [{ productId: "", quantity: 1, unitPrice: 0 }],
+      items: [{ productId: "", quantity: 1, unitPrice: 0, itemSaleType: "REFILL", description: "" }],
       expectedDeliveryDate: todayStr,
       notes: "",
     },
@@ -55,6 +56,25 @@ export function OrderForm({
     control: form.control,
     name: "items",
   });
+
+  const getPrimaryLocation = (customer: any) => {
+    const locs = customer?.locations || [];
+    return locs.find((l: any) => l.isMain || l.isDefault) || locs[0] || null;
+  };
+
+  useEffect(() => {
+    const currentCustId = form.getValues("customerId");
+    const currentLocId = form.getValues("locationId");
+    if (currentCustId && !currentLocId) {
+      const customer = customers.find((c) => c.id === currentCustId);
+      if (customer) {
+        const primary = getPrimaryLocation(customer);
+        if (primary) {
+          form.setValue("locationId", primary.id, { shouldValidate: true });
+        }
+      }
+    }
+  }, [customers, form]);
 
   // Escuchar al cliente seleccionado para mostrar sus sedes
   const selectedCustomerId = form.watch("customerId");
@@ -101,12 +121,40 @@ export function OrderForm({
     }
   };
 
-  // Helper para precio sugerido
-  const handleProductSelect = (index: number, productId: string) => {
+  const handleItemUpdate = (
+    index: number,
+    productId: string,
+    itemType: string,
+    specificCustomerId?: string,
+  ) => {
+    const customerId = specificCustomerId || form.getValues("customerId");
+    const customer = customers.find((c) => c.id === customerId);
     const product = products.find((p) => p.id === productId);
-    if (product) {
-      form.setValue(`items.${index}.unitPrice`, 10); // Lógica temporal. Luego se puede conectar a tarifas por cliente
+
+    if (!product) return;
+
+    let price = 0;
+    let desc = product.name;
+    const customPrice = (customer as any)?.customPrices?.find(
+      (cp: any) => cp.productId === productId,
+    );
+
+    if (itemType === "REFILL") {
+      price = customPrice?.refillPrice || product.priceRefill || 0;
+      desc = `Recarga de ${product.name}`;
+    } else if (itemType === "FULL") {
+      price = customPrice?.fullPrice || product.priceFull || 0;
+      desc = `Venta Nueva de ${product.name}`;
+    } else if (itemType === "BOTTLE") {
+      price = customPrice?.bottlePrice || product.priceEmpty || 0;
+      desc = `Envase Vacío de ${product.name}`;
+    } else if (itemType === "STANDARD") {
+      price = product.priceFull || 0;
+      desc = product.name;
     }
+
+    form.setValue(`items.${index}.unitPrice`, price, { shouldValidate: true });
+    form.setValue(`items.${index}.description`, desc, { shouldValidate: true });
   };
 
   return (
@@ -133,8 +181,29 @@ export function OrderForm({
             <select
               {...form.register("customerId")}
               onChange={(e) => {
-                form.register("customerId").onChange(e);
+                const newCustomerId = e.target.value;
+                form.setValue("customerId", newCustomerId, { shouldValidate: true });
                 form.setValue("locationId", ""); // Resetear la sede al cambiar de cliente
+
+                const customer = customers.find((c) => c.id === newCustomerId);
+                if (customer) {
+                  const primary = getPrimaryLocation(customer);
+                  if (primary) {
+                    form.setValue("locationId", primary.id, { shouldValidate: true });
+                  }
+                }
+
+                const items = form.getValues("items");
+                items.forEach((item, index) => {
+                  if (item.productId) {
+                    handleItemUpdate(
+                      index,
+                      item.productId,
+                      item.itemSaleType || "REFILL",
+                      newCustomerId,
+                    );
+                  }
+                });
               }}
               className="w-full h-11 px-3 rounded-xl border border-slate-200 bg-white font-bold"
             >
@@ -192,7 +261,7 @@ export function OrderForm({
               variant="ghost"
               size="sm"
               onClick={() =>
-                append({ productId: "", quantity: 1, unitPrice: 0 })
+                append({ productId: "", quantity: 1, unitPrice: 0, itemSaleType: "REFILL", description: "" })
               }
               className="h-7 text-xs text-blue-600 font-bold"
             >
@@ -207,7 +276,11 @@ export function OrderForm({
                   {...form.register(`items.${index}.productId`)}
                   onChange={(e) => {
                     form.register(`items.${index}.productId`).onChange(e);
-                    handleProductSelect(index, e.target.value);
+                    handleItemUpdate(
+                      index,
+                      e.target.value,
+                      form.getValues(`items.${index}.itemSaleType`) || "REFILL",
+                    );
                   }}
                   className="flex-1 h-11 px-3 rounded-xl border border-slate-200 text-sm font-bold"
                 >
@@ -217,6 +290,22 @@ export function OrderForm({
                       {p.name}
                     </option>
                   ))}
+                </select>
+                <select
+                  {...form.register(`items.${index}.itemSaleType`)}
+                  onChange={(e) => {
+                    form.register(`items.${index}.itemSaleType`).onChange(e);
+                    handleItemUpdate(
+                      index,
+                      form.getValues(`items.${index}.productId`),
+                      e.target.value,
+                    );
+                  }}
+                  className="w-44 h-11 px-3 rounded-xl border border-slate-200 text-sm font-bold bg-blue-50 text-blue-800"
+                >
+                  <option value="REFILL">Recarga</option>
+                  <option value="FULL">Venta Nueva</option>
+                  <option value="BOTTLE">Solo Envase</option>
                 </select>
                 <Input
                   {...form.register(`items.${index}.quantity`)}
@@ -232,7 +321,7 @@ export function OrderForm({
                   <Input
                     {...form.register(`items.${index}.unitPrice`)}
                     type="number"
-                    step="0.10"
+                    step={PRICE_STEP}
                     min="0"
                     placeholder="Precio"
                     className="w-full h-11 pl-8 font-bold border-slate-200"

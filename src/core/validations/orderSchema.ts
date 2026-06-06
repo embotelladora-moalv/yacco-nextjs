@@ -1,9 +1,12 @@
 import { z } from "zod";
+import { priceField } from "@/core/utils/priceConfig";
 
 export const orderItemSchema = z.object({
   productId: z.string().min(1, "Debe seleccionar un producto"),
   quantity: z.coerce.number().min(1, "Debe pedir al menos 1 unidad"),
-  unitPrice: z.coerce.number().min(0, "El precio no puede ser negativo"),
+  unitPrice: priceField(),
+  itemSaleType: z.enum(["REFILL", "FULL", "BOTTLE", "STANDARD"]).default("STANDARD"),
+  description: z.string().optional(),
 });
 
 export const orderSchema = z.object({

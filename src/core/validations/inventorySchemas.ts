@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { priceField } from "@/core/utils/priceConfig";
 
 export const productSchema = z.object({
   name: z.string().min(3, "El nombre debe tener al menos 3 caracteres"),
@@ -17,9 +18,9 @@ export const productSchema = z.object({
   isReturnableContainer: z.boolean().default(true),
 
   // Precios
-  priceRefill: z.coerce.number().min(0),
-  priceFull: z.coerce.number().min(0),
-  priceEmpty: z.coerce.number().min(0),
+  priceRefill: priceField(),
+  priceFull: priceField(),
+  priceEmpty: priceField(),
 
   // Stocks Iniciales
   initialStockFilled: z.coerce.number().min(0),

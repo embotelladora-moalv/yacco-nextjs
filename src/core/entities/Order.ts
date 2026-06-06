@@ -5,6 +5,8 @@ export interface OrderItem {
   productId: string;
   quantity: number;
   unitPrice: number; // Precio pactado para esta reserva
+  itemSaleType: "REFILL" | "FULL" | "BOTTLE" | "STANDARD";
+  description?: string;
 }
 
 export interface Order {

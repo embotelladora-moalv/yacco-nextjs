@@ -1,5 +1,6 @@
 // src/core/validations/crmSchemas.ts
 import { z } from "zod";
+import { priceField, priceFieldOptional } from "@/core/utils/priceConfig";
 
 export const customerLocationSchema = z.object({
   id: z.string().optional(),
@@ -41,9 +42,9 @@ export const customerSchema = z.object({
       z.object({
         productId: z.string(),
         productName: z.string(),
-        refillPrice: z.coerce.number().min(0).optional(),
-        fullPrice: z.coerce.number().min(0).optional(),
-        bottlePrice: z.coerce.number().min(0).optional(),
+        refillPrice: priceFieldOptional(),
+        fullPrice: priceFieldOptional(),
+        bottlePrice: priceFieldOptional(),
       }),
     )
     .optional()
@@ -60,7 +61,7 @@ export type CustomerFormValues = z.infer<typeof customerSchema>;
 export const saleItemSchema = z.object({
   productId: z.string().min(1, "Seleccione un producto"),
   quantity: z.coerce.number().min(1, "Debe vender al menos 1"),
-  unitPrice: z.coerce.number().min(0),
+  unitPrice: priceField(),
   lotNumber: z.string().optional(), // Lote seleccionado o auto-asignado
   description: z.string().optional(),
   itemSaleType: z

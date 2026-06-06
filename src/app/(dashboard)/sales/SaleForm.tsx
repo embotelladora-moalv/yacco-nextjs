@@ -5,6 +5,7 @@ import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { saleSchema, SaleFormValues } from "@/core/validations/crmSchemas";
 import { registerSaleAction } from "./actions";
+import { PRICE_STEP } from "@/core/utils/priceConfig";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -654,7 +655,7 @@ export function SaleForm({
                       <Input
                         {...form.register(`items.${index}.unitPrice`)}
                         type="number"
-                        step="0.10"
+                        step={PRICE_STEP}
                         min="0"
                         className="h-11 pl-8 font-black text-right bg-white"
                       />
