@@ -801,6 +801,36 @@ export const salesRepository = {
     });
   },
 
+  async getPaymentsByDateRange(options: {
+    startDate?: string;
+    endDate?: string;
+  }): Promise<any[]> {
+    let query: admin.firestore.Query = adminDb.collection("debtPayments");
+
+    if (options.startDate) {
+      const startTimestamp = admin.firestore.Timestamp.fromDate(
+        new Date(`${options.startDate}T00:00:00-05:00`)
+      );
+      query = query.where("createdAt", ">=", startTimestamp);
+    }
+    if (options.endDate) {
+      const endTimestamp = admin.firestore.Timestamp.fromDate(
+        new Date(`${options.endDate}T23:59:59-05:00`)
+      );
+      query = query.where("createdAt", "<=", endTimestamp);
+    }
+
+    query = query.orderBy("createdAt", "desc");
+    const snapshot = await query.get();
+
+    return snapshot.docs.map((doc) => {
+      return serializeFirestoreData({
+        id: doc.id,
+        ...doc.data(),
+      });
+    });
+  },
+
   async cancelPayment(
     paymentId: string,
     cancelledByUid: string,
