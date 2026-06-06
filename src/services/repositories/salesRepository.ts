@@ -638,6 +638,7 @@ export const salesRepository = {
       const pendingQuery = adminDb
         .collection(SALES_COLLECTION)
         .where("customerId", "==", data.customerId)
+        .where("status", "==", "COMPLETED")
         .where("paymentStatus", "in", ["UNPAID", "PARTIAL"])
         .orderBy("createdAt", "asc");
 
@@ -700,6 +701,7 @@ export const salesRepository = {
     const snapshot = await adminDb
       .collection(SALES_COLLECTION)
       .where("customerId", "==", customerId)
+      .where("status", "==", "COMPLETED")
       .where("paymentStatus", "in", ["UNPAID", "PARTIAL"])
       .orderBy("createdAt", "asc")
       .get();
@@ -1169,6 +1171,7 @@ export const salesRepository = {
       // 3. ESCRITURAS COMUNES
       transaction.update(saleRef, {
         status: "CANCELLED",
+        remainingBalance: 0,
         cancelledBy: cancelledByUid,
         cancellationReason: reason,
         cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
