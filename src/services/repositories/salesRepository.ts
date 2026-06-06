@@ -689,6 +689,8 @@ export const salesRepository = {
       const paymentRef = adminDb.collection("debtPayments").doc();
       transaction.set(paymentRef, {
         ...data,
+        bankId: data.bankId || null,
+        bankName: data.bankName || null,
         appliedTo: appliedTo,
         status: "ACTIVE",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),

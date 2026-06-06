@@ -1,10 +1,14 @@
 import { settingsRepository } from "@/services/repositories/settingsRepository";
+import { bankRepository } from "@/services/repositories/bankRepository";
 import { Settings } from "lucide-react";
 import { SettingsManager } from "./SettingsManager";
 import { DangerZoneSection } from "./DangerZoneSection";
 
 export default async function SettingsPage() {
-  const settings = await settingsRepository.getSettings();
+  const [settings, banks] = await Promise.all([
+    settingsRepository.getSettings(),
+    bankRepository.getAllBanks(),
+  ]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10 px-4 sm:px-0">
@@ -21,7 +25,7 @@ export default async function SettingsPage() {
         </div>
       </div>
 
-      <SettingsManager settings={settings} />
+      <SettingsManager settings={settings} banks={banks} />
       <DangerZoneSection />
     </div>
   );
