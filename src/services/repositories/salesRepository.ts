@@ -12,6 +12,7 @@ const CUSTOMERS_COLLECTION = "customers";
 const DISPATCH_COLLECTION = "dispatchManifests";
 const PRODUCTS_COLLECTION = "products";
 const PRODUCTION_COLLECTION = "productionBatches";
+const CUSTOMER_CONTAINER_LOGS_COLLECTION = "customerContainerLogs";
 
 export const salesRepository = {
   /**
@@ -398,6 +399,38 @@ export const salesRepository = {
         lastSaleDate: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+
+      // Calcular delta neto de envases
+      const deltaMap = new Map<string, number>();
+      (data.items || []).forEach((item) => {
+        deltaMap.set(item.productId, (deltaMap.get(item.productId) || 0) + item.quantity);
+      });
+      (data.returnedEmpties || []).forEach((empty) => {
+        deltaMap.set(empty.productId, (deltaMap.get(empty.productId) || 0) - empty.quantity);
+      });
+
+      const delta = Array.from(deltaMap.entries())
+        .map(([productId, d]) => ({ productId, delta: d }))
+        .filter((item) => item.delta !== 0);
+
+      if (delta.length > 0) {
+        const containerLogRef = adminDb.collection(CUSTOMER_CONTAINER_LOGS_COLLECTION).doc();
+        transaction.set(containerLogRef, {
+          id: containerLogRef.id,
+          customerId: data.customerId,
+          type: "SALE",
+          saleId: newSaleRef.id,
+          manifestId: data.saleType === "ROUTE" ? (data.manifestId || null) : null,
+          delta,
+          detail: {
+            items: data.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+            returnedEmpties: data.returnedEmpties.map((e) => ({ productId: e.productId, quantity: e.quantity })),
+          },
+          balanceAfter: newContainerBalances,
+          userId: registeredBy || "SYSTEM",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
 
       // C) ACTUALIZAR INVENTARIOS SEGÚN EL TIPO DE VENTA
       if (data.saleType === "ROUTE" && manifestRef && manifest) {

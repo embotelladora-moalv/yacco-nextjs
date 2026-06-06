@@ -6,6 +6,25 @@ export interface CustomerContainerBalance {
   balance: number;
 }
 
+export interface ContainerLogDelta { productId: string; delta: number; }
+export interface ContainerLogBalance { productId: string; balance: number; }
+export interface CustomerContainerLog {
+  id: string;
+  customerId: string;
+  type: "SALE" | "DELIVERY" | "ADJUSTMENT";
+  saleId?: string;
+  manifestId?: string;
+  delta: ContainerLogDelta[];          // cambio neto por producto (entregado - devuelto)
+  detail: {
+    items: { productId: string; quantity: number }[];
+    returnedEmpties: { productId: string; quantity: number }[];
+  };
+  balanceAfter: ContainerLogBalance[];  // snapshot del saldo resultante
+  reason?: string;                       // obligatorio solo para ADJUSTMENT (fase 2)
+  userId: string;
+  createdAt: Date;
+}
+
 export interface CustomerLocation {
   id: string;
   name: string;
