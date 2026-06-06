@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { cancelPaymentAction } from "../../actions"; // Asegúrate de que esta ruta hacia tus Server Actions sea correcta
+import { cancelPaymentAction } from "@/app/(dashboard)/collections/actions";
 import {
   History,
   ChevronDown,
@@ -17,9 +17,13 @@ import {
 interface PaymentHistoryListProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payments: any[];
+  showCancelButton?: boolean;
 }
 
-export function PaymentHistoryList({ payments }: PaymentHistoryListProps) {
+export function PaymentHistoryList({
+  payments,
+  showCancelButton = true,
+}: PaymentHistoryListProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState<string | null>(null);
 
@@ -187,7 +191,7 @@ export function PaymentHistoryList({ payments }: PaymentHistoryListProps) {
                   )}
 
                   {/* BOTÓN DE ANULAR (Solo si no está anulado ya) */}
-                  {!isCancelled && (
+                  {showCancelButton && !isCancelled && (
                     <div className="mt-4 pt-3 border-t border-slate-200 flex justify-end">
                       <button
                         onClick={() =>
