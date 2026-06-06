@@ -12,6 +12,7 @@ interface DispatchDashboardProps {
   liquidatedRoutes: any[];
   users: any[];
   products: any[];
+  activeSales: any[];
   nextCursor: string | null;
   hasMore: boolean;
   totalCount: number;
@@ -27,6 +28,7 @@ export function DispatchDashboard({
   liquidatedRoutes,
   users,
   products,
+  activeSales,
   nextCursor,
   hasMore,
   totalCount,
@@ -68,7 +70,12 @@ export function DispatchDashboard({
           <Truck className="h-5 w-5 text-blue-500" /> Unidades Activas en
           Reparto ({activeRoutes.length})
         </h2>
-        <ActiveRoutesCards activeRoutes={activeRoutes} users={users} />
+        <ActiveRoutesCards
+          activeRoutes={activeRoutes}
+          users={users}
+          activeSales={activeSales}
+          products={products}
+        />
       </div>
 
       {/* SECCIÓN 2: HISTORIAL AVANZADO DE LIQUIDACIONES */}

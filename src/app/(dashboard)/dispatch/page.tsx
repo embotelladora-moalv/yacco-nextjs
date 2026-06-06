@@ -1,6 +1,7 @@
 import { dispatchRepository } from "@/services/repositories/dispatchRepository";
 import { userRepository } from "@/services/repositories/userRepository";
 import { inventoryRepository } from "@/services/repositories/inventoryRepository";
+import { salesRepository } from "@/services/repositories/salesRepository";
 import { DispatchDashboard } from "./DispatchDashboard";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +50,11 @@ export default async function DispatchPage({ searchParams }: PageProps) {
 
   const { items: liquidatedRoutes, nextCursor, hasMore } = paginatedLiquidated;
 
+  const activeManifestIds = activeRoutes.map((r) => r.id);
+  const activeSales = activeManifestIds.length
+    ? await salesRepository.getSalesByManifestIds(activeManifestIds)
+    : [];
+
   return (
     <div className="max-w-[1400px] mx-auto pb-10 pt-4 px-4">
       {/* 2. Enviamos la información limpia al cliente orquestador */}
@@ -57,6 +63,7 @@ export default async function DispatchPage({ searchParams }: PageProps) {
         liquidatedRoutes={liquidatedRoutes as any}
         users={users as any}
         products={products as any}
+        activeSales={activeSales as any}
         nextCursor={nextCursor}
         hasMore={hasMore}
         totalCount={totalCount}
