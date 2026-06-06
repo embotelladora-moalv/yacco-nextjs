@@ -8,6 +8,7 @@ import {
 } from "@/core/validations/inventorySchemas";
 import { inventoryRepository } from "@/services/repositories/inventoryRepository";
 import { revalidatePath } from "next/cache";
+import { getUserSession } from "@/services/firebase/auth";
 
 export async function saveProductAction(data: ProductFormValues, id?: string) {
   try {
@@ -36,9 +37,12 @@ export async function registerPurchaseAction(
   quantity: number,
 ) {
   try {
+    const session = await getUserSession();
+    if (!session) {
+      return { success: false, error: "Sesión inválida. Vuelve a iniciar sesión." };
+    }
     if (quantity <= 0) throw new Error("La cantidad debe ser mayor a 0");
-    // TODO: En producción, reemplazar "ADMIN_ID" por el ID del usuario en sesión
-    await inventoryRepository.registerPurchase(productId, quantity, "ADMIN_ID");
+    await inventoryRepository.registerPurchase(productId, quantity, session.uid);
     revalidatePath("/inventory");
     return { success: true };
   } catch (error: any) {
@@ -50,6 +54,10 @@ export async function registerProductionAction(
   data: ProductionBatchFormValues,
 ) {
   try {
+    const session = await getUserSession();
+    if (!session) {
+      return { success: false, error: "Sesión inválida. Vuelve a iniciar sesión." };
+    }
     const parsed = productionBatchSchema.parse(data);
 
     await inventoryRepository.registerProduction({
@@ -62,7 +70,7 @@ export async function registerProductionAction(
       isTollManufacturing: parsed.isTollManufacturing,
       brandName: data.isTollManufacturing ? data.brandName || "" : "",
       notes: parsed.notes,
-      managerId: "ADMIN_ID", // TODO: Reemplazar con usuario real
+      managerId: session.uid,
     });
 
     revalidatePath("/inventory");

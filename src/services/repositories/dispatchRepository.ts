@@ -259,6 +259,7 @@ export const dispatchRepository = {
       digitalPaymentsReported?: number;
       notes?: string;
     },
+    userId?: string,
   ): Promise<void> {
     await adminDb.runTransaction(async (transaction) => {
       const manifestRef = adminDb
@@ -394,7 +395,7 @@ export const dispatchRepository = {
               movementType: "RETURN",
               delta: reportedItem.quantityReturnedFull,
               resultingBalance: newFilledStock,
-              userId: manifestData?.dispatcherId || manifestData?.driverId || "SYSTEM",
+              userId: userId || manifestData?.dispatcherId || manifestData?.driverId || "SYSTEM",
             },
           });
         }
@@ -458,7 +459,7 @@ export const dispatchRepository = {
             movementType: "RETURN",
             delta: emptyReturn.quantityReturned,
             resultingBalance: newEmptyStock,
-            userId: manifestData?.dispatcherId || manifestData?.driverId || "SYSTEM",
+            userId: userId || manifestData?.dispatcherId || manifestData?.driverId || "SYSTEM",
           },
         });
       }
@@ -546,6 +547,7 @@ export const dispatchRepository = {
       additionalPettyCash: number;
       notes?: string;
     },
+    userId?: string,
   ): Promise<void> {
     await adminDb.runTransaction(async (transaction) => {
       const manifestRef = adminDb
@@ -731,7 +733,7 @@ export const dispatchRepository = {
             delta: -item.quantityRequested,
             resultingBalance: newFilledStock,
             userId:
-              currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
+              userId || currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
           },
         });
       }
@@ -791,7 +793,7 @@ export const dispatchRepository = {
             delta: retFull.quantity,
             resultingBalance: newFilledStock,
             userId:
-              currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
+              userId || currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
           },
         });
       }
@@ -840,7 +842,7 @@ export const dispatchRepository = {
             delta: emptyReturn.quantity,
             resultingBalance: newEmptyStock,
             userId:
-              currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
+              userId || currentManifest.dispatcherId || currentManifest.driverId || "SYSTEM",
           },
         });
       }

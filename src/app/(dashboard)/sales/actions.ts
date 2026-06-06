@@ -10,6 +10,7 @@ import { dispatchRepository } from "@/services/repositories/dispatchRepository";
 import { customerRepository } from "@/services/repositories/customerRepository";
 import { saleSchema, SaleFormValues } from "@/core/validations/crmSchemas";
 import { revalidatePath } from "next/cache";
+import { getUserSession } from "@/services/firebase/auth";
 
 export async function registerSaleAction(
   data: SaleFormValues & { linkedOrderId?: string },
@@ -18,16 +19,11 @@ export async function registerSaleAction(
     const parsedData = saleSchema.parse(data);
 
     // Auditoría de Usuario
-    const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get("yacco_session")?.value;
-    if (!sessionCookie)
+    const session = await getUserSession();
+    if (!session) {
       throw new Error("No hay una sesión activa. Vuelva a iniciar sesión.");
-
-    const decodedClaims = await adminAuth.verifySessionCookie(
-      sessionCookie,
-      true,
-    );
-    const registeredByUid = decodedClaims.uid;
+    }
+    const registeredByUid = session.uid;
 
     // Asignación de caja e inventario (Chofer o Planta)
     let actualDriverId = "ADMIN_PLANT";

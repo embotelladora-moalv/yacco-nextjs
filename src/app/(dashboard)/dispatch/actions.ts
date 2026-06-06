@@ -10,6 +10,7 @@ import {
   advancedPitStopSchema,
 } from "@/core/validations/dispatchSchemas";
 import { revalidatePath } from "next/cache";
+import { getUserSession } from "@/services/firebase/auth";
 
 // =========================================================================
 // 1. IMPORTA AQUÍ TU SISTEMA DE AUTENTICACIÓN
@@ -20,28 +21,12 @@ import { revalidatePath } from "next/cache";
 
 export async function createDispatchAction(data: DispatchManifestFormValues) {
   try {
+    const session = await getUserSession();
+    if (!session) {
+      return { success: false, error: "Sesión inválida. Vuelve a iniciar sesión." };
+    }
+    const dispatcherId = session.uid;
     const parsed = dispatchManifestSchema.parse(data);
-
-    // =========================================================================
-    // 2. OBTENER EL USUARIO REAL DE LA SESIÓN
-    // =========================================================================
-    let dispatcherId = "ADMIN_ID"; // Fallback por defecto si algo falla
-
-    // OPCIÓN A: Si usas NextAuth
-    // const session = await getServerSession();
-    // if (!session?.user?.id) throw new Error("No autorizado");
-    // dispatcherId = session.user.id;
-
-    // OPCIÓN B: Si usas Clerk
-    // const { userId } = auth();
-    // if (!userId) throw new Error("No autorizado");
-    // dispatcherId = userId;
-
-    // OPCIÓN C: Si usas Firebase Auth (Verificando Cookies de Sesión)
-    // const sessionCookie = cookies().get('session')?.value;
-    // if (!sessionCookie) throw new Error("No autorizado");
-    // const decodedClaims = await adminAuth.verifySessionCookie(sessionCookie, true);
-    // dispatcherId = decodedClaims.uid;
 
     const manifestId = await dispatchRepository.createDispatch(
       parsed.driverId,
@@ -68,9 +53,13 @@ export async function liquidateDispatchAction(
   data: LiquidationManifestFormValues,
 ) {
   try {
+    const session = await getUserSession();
+    if (!session) {
+      return { success: false, error: "Sesión inválida. Vuelve a iniciar sesión." };
+    }
     const parsed = liquidationManifestSchema.parse(data);
 
-    await dispatchRepository.liquidateDispatch(manifestId, parsed);
+    await dispatchRepository.liquidateDispatch(manifestId, parsed, session.uid);
 
     revalidatePath("/dispatch");
     revalidatePath("/inventory");
@@ -87,11 +76,15 @@ export async function advancedReloadDispatchAction(
   data: AdvancedPitStopFormValues,
 ) {
   try {
+    const session = await getUserSession();
+    if (!session) {
+      return { success: false, error: "Sesión inválida. Vuelve a iniciar sesión." };
+    }
     // 1. Validación estricta con Zod
     const parsedData = advancedPitStopSchema.parse(data);
 
     // 2. Ejecutar lógica transaccional del Pit Stop
-    await dispatchRepository.advancedReloadDispatch(manifestId, parsedData);
+    await dispatchRepository.advancedReloadDispatch(manifestId, parsedData, session.uid);
 
     // 3. Limpiar caché para refrescar la interfaz
     revalidatePath("/dispatch");
