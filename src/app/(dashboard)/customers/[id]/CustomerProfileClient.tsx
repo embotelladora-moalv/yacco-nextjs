@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import ConsolidateBillingPanel from "@/components/sunat/ConsolidateBillingPanel"; // <-- IMPORTAMOS EL PANEL
+import { PaymentHistoryList } from "@/app/(dashboard)/collections/[customer_id]/pay/PaymentHistoryList";
 
 // Estructura de las ventas pendientes
 export interface PendingSale {
@@ -35,6 +36,8 @@ interface CustomerProfileProps {
   products: Product[];
   pendingSales: PendingSale[]; // <-- NUEVA PROP
   containerLogs?: (Omit<CustomerContainerLog, "createdAt"> & { createdAt: string | Date; userName: string })[]; // <-- NUEVA PROP
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payments?: any[];
 }
 
 export function CustomerProfileClient({
@@ -42,6 +45,7 @@ export function CustomerProfileClient({
   products,
   pendingSales = [], // Por defecto vacío si no hay
   containerLogs = [], // <-- NUEVA PROP
+  payments = [],
 }: CustomerProfileProps) {
   // Helper para obtener el nombre del producto
   const getProductName = (id: string) => {
@@ -412,6 +416,10 @@ export function CustomerProfileClient({
           customerName={customer.name}
           pendingSales={pendingSales}
         />
+
+        <div className="pt-4 border-t border-slate-200/60">
+          <PaymentHistoryList payments={payments} showCancelButton={false} />
+        </div>
       </div>
     </div>
   );

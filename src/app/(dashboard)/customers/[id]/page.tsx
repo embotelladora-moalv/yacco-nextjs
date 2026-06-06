@@ -1,6 +1,7 @@
 import { customerRepository } from "@/services/repositories/customerRepository";
 import { inventoryRepository } from "@/services/repositories/inventoryRepository";
 import { userRepository } from "@/services/repositories/userRepository";
+import { salesRepository } from "@/services/repositories/salesRepository";
 import { notFound } from "next/navigation";
 import { CustomerProfileClient } from "./CustomerProfileClient";
 import { adminDb } from "@/services/firebase/admin";
@@ -13,12 +14,13 @@ export default async function CustomerProfilePage({
   const resolvedParams = await params;
   const customerId = resolvedParams.id;
 
-  // Consultamos al cliente, catálogo de productos, logs de envases y usuarios del sistema en paralelo
-  const [customer, products, containerLogs, users] = await Promise.all([
+  // Consultamos al cliente, catálogo de productos, logs de envases, usuarios del sistema y pagos en paralelo
+  const [customer, products, containerLogs, users, payments] = await Promise.all([
     customerRepository.getCustomerById(customerId),
     inventoryRepository.getAllProducts(),
     customerRepository.getContainerLogsByCustomerId(customerId, 50),
     userRepository.getAll(),
+    salesRepository.getCustomerPaymentHistory(customerId),
   ]);
 
   if (!customer) {
@@ -75,6 +77,7 @@ export default async function CustomerProfilePage({
       products={products}
       pendingSales={pendingSales}
       containerLogs={resolvedLogs}
+      payments={payments}
     />
   );
 }
