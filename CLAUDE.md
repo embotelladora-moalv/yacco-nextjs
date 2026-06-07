@@ -139,7 +139,7 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 - **Consistencia Financiera y Fixes COMPLETA**:
   - Fix en `PaymentForm` y `CollectionForm` agregando `valueAsNumber: true` / coerciones necesarias para evitar errores de tipo en el monto ("expected number, received string").
   - Las ventas anuladas ya no figuran en cobranzas (la acción `cancelSaleAction` actualiza `remainingBalance` a 0 y las consultas de cobranza filtran por `status == "COMPLETED"`).
-  - La acción `confirmOrderDeliveryAction` ahora actualiza correctamente los campos `status`, `remainingBalance` y `paymentStatus` (antes la venta de entrega incrementaba la deuda total del cliente pero no aparecía listada en cobranzas).
+  - La Server Action `confirmOrderDeliveryAction` y el modal de entrega rápida en `DispatchDetailsClient.tsx` fueron eliminados por completo en la limpieza de código muerto, ya que eran redundantes y el flujo de entrega de pedidos se realiza de forma unificada mediante `/sales/new?orderId=`.
 - **Trazabilidad de envases (3 fases) COMPLETA**:
   - Colección `customerContainerLogs` (`type`: `SALE`/`DELIVERY`/`ADJUSTMENT`/`REVERSAL`).
   - **Fase 1**: Escritura automática de logs en ventas y entregas en ruta.
@@ -160,13 +160,20 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 - **Normalización de fines de línea**: Se agregó el archivo `.gitattributes` en la raíz para normalizar EOL (LF/CRLF) y evitar ruidos masivos en commits.
 - **Migración app viejo COMPLETA**: 21k docs migrados, 0 huérfanos.
 - **hasTap configurable por empaque**: Configuración de `hasTap` (`true`/`false`/`null`) y reportes en planta asociados.
+- **Historial Global de Cobranzas COMPLETO**:
+  - Implementación de la ruta `/collections/history` para consultar el histórico de cobros (todos los clientes por rango de fechas) de forma paginada y escalable (patrón de cursores + selector `pageSize`).
+  - Cálculo eficiente en el servidor del total del período (ACTIVE) para todo el rango seleccionado usando `getActivePaymentsMetricsByDateRange` con `.select(...)` (evitando ráfaga de consultas y sin necesidad de índices compuestos adicionales, ya que usa el índice automático de campo único `createdAt`).
+  - Mapeo robusto de nombres de clientes y de operadores que cobran (resolución de `receivedById` con fallback a "Sistema" para placeholders y "Usuario no registrado" para UIDs sin documento en la colección `users`).
+  - Los cobros anulados (`status === "CANCELLED"`) se muestran con estilo visual distintivo (tachados/rojos) y quedan excluidos del total cobrado del período.
+- **Limpieza de Código Muerto COMPLETA**:
+  - Eliminación de archivos obsoletos y redundantes: `CollectionForm.tsx` y `paymentRepository.ts` (lógica vieja basada en `orders`/`payments`).
+  - Remoción del modal latente de entrega rápida en `DispatchDetailsClient.tsx` y su Server Action `confirmOrderDeliveryAction`. El flujo unificado de entrega de pedidos reside en `/sales/new?orderId=`. Se limpiaron aproximadamente 532 líneas de código muerto.
 
 ### Pendientes siguientes
 
-- 🚨 **DESPLEGAR ÍNDICES FIRESTORE (BLOQUEANTE)**: Varios filtros y consultas no funcionarán en base de datos real hasta ejecutar `firebase deploy --only firestore:indexes`. Afecta filtros de ventas anuladas (`status+createdAt`), historial de envases (`customerId+createdAt`), ordenación de bancos (`isActive+name` ASC) e historial de cobranza.
+- 🚨 **DESPLEGAR ÍNDICES FIRESTORE (BLOQUEANTE)**: Varios filtros y consultas no funcionarán en base de datos real hasta ejecutar `firebase deploy --only firestore:indexes`. Afecta filtros de ventas anuladas (`status+createdAt`), historial de envases (`customerId+createdAt`), ordenación de bancos (`isActive+name` ASC) e historial de cobranza (nota: la consulta del historial global de cobranzas no requiere índice compuesto nuevo ya que usa `createdAt` como filtro de desigualdad y ordenamiento único).
 - 🚨 **Fase B de Anulaciones (Nota de Crédito/Baja)**: Anulación de ventas ya facturadas mediante la emisión de Nota de Crédito (tipo 07) o Baja formal de Boletas/Facturas ante SUNAT.
 - 🚨 **RESET de producción pendiente**: Proceso crítico para limpiar el histórico transaccional en pruebas antes de la puesta en marcha real (dejar clientes con deuda a 0 y productos con stock manual a 0). Requiere dry-run y dump local de seguridad previo.
-- **Reporte Global de Cobranzas**: Implementar vista para consultar un histórico unificado de cobros (todos los clientes por rango de fechas). Actualmente solo se ven de forma individual por ficha de cliente.
 - Reimport de DNIs (Prompt D) cuando el Excel esté lleno.
 - Rellenar placeholders de la documentación académica (`docs/proyecto/`).
 - Bugs críticos vigentes: BUG-02 (fecha GRE), BUG-03 (worker SUNAT real), BUG-04 (seed).
@@ -179,10 +186,8 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 
 ### Deuda relevante
 
-- **Código Muerto en Cobranzas**: Componente `CollectionForm.tsx` (ningún componente lo importa) y `paymentRepository.ts` (lógica de cobro vieja basada en `orders`/`payments`). Se sugiere su remoción en una rama limpia.
-- **Modal de entrega rápida**: En `DispatchDetailsClient.tsx` se define el estado `saleModalOpen` pero no tiene ningún botón o trigger activo en la UI (latente).
 - Ocurrencias de `as any` en el proyecto (reducidas sustancialmente esta sesión, aunque persiste en los resolvers complejos de Zod/React Hook Form).
-- Cobertura de tests unitarios inicial (26 tests unitarios montados en Vitest), requiere expandirse a otros casos de uso.
+- Cobertura de tests unitarios inicial (26 tests unitarios montados en Vitest), requiere expandirse a otros casos de uso como el pago dirigido y la lógica de cobranzas (deuda de testing pendiente).
 - `CustomerLocation` duplicado en `Customer.ts` y `CRM.ts` con shapes distintos.
 - URL de SUNAT BETA hardcodeada en 3 archivos (debería ser env var).
 
