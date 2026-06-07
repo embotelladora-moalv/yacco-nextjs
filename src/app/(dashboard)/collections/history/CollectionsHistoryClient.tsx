@@ -11,7 +11,9 @@ import {
   Loader2,
   User,
   Building,
-  PiggyBank
+  PiggyBank,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -34,12 +36,29 @@ interface Payment {
 
 interface CollectionsHistoryClientProps {
   payments: Payment[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  totalCount: number;
+  metrics: {
+    totalCollected: number;
+    totalCash: number;
+    totalTransfer: number;
+    totalYapePlin: number;
+  };
+  currentCursors: string;
+  currentLimit: number;
   startDate: string;
   endDate: string;
 }
 
 export function CollectionsHistoryClient({
   payments,
+  nextCursor,
+  hasMore,
+  totalCount,
+  metrics,
+  currentCursors,
+  currentLimit,
   startDate: initialStartDate,
   endDate: initialEndDate,
 }: CollectionsHistoryClientProps) {
@@ -50,38 +69,60 @@ export function CollectionsHistoryClient({
   const [startDate, setStartDate] = useState(initialStartDate);
   const [endDate, setEndDate] = useState(initialEndDate);
 
-  const applyFilters = (start: string, end: string) => {
+  const navigate = (params: {
+    startDate?: string;
+    endDate?: string;
+    cursors?: string;
+    limit?: number;
+  }) => {
     const query = new URLSearchParams();
-    if (start) query.set("startDate", start);
-    if (end) query.set("endDate", end);
+
+    const newStart = params.startDate !== undefined ? params.startDate : startDate;
+    if (newStart) query.set("startDate", newStart);
+
+    const newEnd = params.endDate !== undefined ? params.endDate : endDate;
+    if (newEnd) query.set("endDate", newEnd);
+
+    const newCursors = params.cursors !== undefined ? params.cursors : currentCursors;
+    if (newCursors) query.set("cursors", newCursors);
+
+    const newLimit = params.limit !== undefined ? params.limit : currentLimit;
+    query.set("limit", String(newLimit));
 
     startTransition(() => {
       router.push(`${pathname}?${query.toString()}`);
     });
   };
 
+  const applyFilters = (start: string, end: string) => {
+    navigate({ startDate: start, endDate: end, cursors: "" });
+  };
+
   const handleClearFilters = () => {
     const today = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Lima" });
     setStartDate(today);
     setEndDate(today);
-    applyFilters(today, today);
+    navigate({ startDate: today, endDate: today, cursors: "" });
   };
 
-  // Calculate totals
-  const activePayments = payments.filter((p) => p.status === "ACTIVE");
-  const totalAmount = activePayments.reduce((sum, p) => sum + p.amount, 0);
+  const cursorArray = currentCursors ? currentCursors.split(",") : [];
+  const currentPage = cursorArray.length + 1;
+  const totalPages = Math.ceil(totalCount / currentLimit);
 
-  const totalCash = activePayments
-    .filter((p) => p.paymentMethod === "CASH")
-    .reduce((sum, p) => sum + p.amount, 0);
+  const handleNextPage = () => {
+    if (!hasMore || !nextCursor) return;
+    const nextCursors = currentCursors ? `${currentCursors},${nextCursor}` : nextCursor;
+    navigate({ cursors: nextCursors });
+  };
 
-  const totalTransfer = activePayments
-    .filter((p) => p.paymentMethod === "TRANSFER")
-    .reduce((sum, p) => sum + p.amount, 0);
+  const handlePrevPage = () => {
+    if (currentPage === 1) return;
+    const prevCursors = cursorArray.slice(0, -1).join(",");
+    navigate({ cursors: prevCursors });
+  };
 
-  const totalYapePlin = activePayments
-    .filter((p) => p.paymentMethod === "YAPE_PLIN")
-    .reduce((sum, p) => sum + p.amount, 0);
+  // Metrics from server representing the entire range
+  const { totalCollected, totalCash, totalTransfer, totalYapePlin } = metrics;
 
   const formatDateTime = (isoString: string) => {
     if (!isoString) return "-";
@@ -175,10 +216,10 @@ export function CollectionsHistoryClient({
               Total Cobrado
             </p>
             <p className="text-2xl font-black text-red-600">
-              S/ {totalAmount.toFixed(2)}
+              S/ {totalCollected.toFixed(2)}
             </p>
             <p className="text-xs text-red-500 font-medium">
-              {activePayments.length} pagos activos
+              Recaudación del período
             </p>
           </div>
           <div className="h-12 w-12 rounded-2xl bg-red-100 flex items-center justify-center text-red-600">
@@ -327,6 +368,49 @@ export function CollectionsHistoryClient({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* FOOTER: PAGINACIÓN ESCALABLE */}
+        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex flex-col md:flex-row items-center justify-between gap-4 mt-auto rounded-b-[2rem]">
+          <div className="flex items-center gap-2 text-sm text-slate-500 font-medium">
+            <span>Mostrar</span>
+            <select
+              value={currentLimit}
+              onChange={(e) => {
+                navigate({ limit: Number(e.target.value), cursors: "" });
+              }}
+              className="border border-slate-200 bg-white rounded-md px-2 py-1 font-bold text-slate-700 focus:outline-none shadow-sm text-xs"
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+            <span>registros por página</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePrevPage}
+              disabled={currentPage === 1}
+              className="h-8 w-8 p-0 bg-white shadow-sm rounded-lg"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="flex items-center px-4 h-8 text-xs font-black text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm">
+              Página {currentPage} de {totalPages || 1}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleNextPage}
+              disabled={!hasMore}
+              className="h-8 w-8 p-0 bg-white shadow-sm rounded-lg"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

@@ -11,11 +11,15 @@ interface PageProps {
   searchParams: Promise<{
     startDate?: string;
     endDate?: string;
+    limit?: string;
+    cursors?: string;
   }>;
 }
 
 export default async function CollectionsHistoryPage({ searchParams }: PageProps) {
   const resolvedSearchParams = await searchParams;
+  const cursorsParam = resolvedSearchParams.cursors || "";
+  const limit = resolvedSearchParams.limit ? parseInt(resolvedSearchParams.limit, 10) : 10;
   
   // Default to today's date in America/Lima timezone (sv-SE locale output format is YYYY-MM-DD)
   const todayInLima = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Lima" });
@@ -23,26 +27,51 @@ export default async function CollectionsHistoryPage({ searchParams }: PageProps
   const startDate = resolvedSearchParams.startDate || todayInLima;
   const endDate = resolvedSearchParams.endDate || todayInLima;
 
-  // Fetch payments in range
-  const payments = await salesRepository.getPaymentsByDateRange({ startDate, endDate });
+  const cursorArray = cursorsParam ? cursorsParam.split(",") : [];
+  const currentCursor = cursorArray[cursorArray.length - 1];
 
-  // Fetch unique customer details
+  // Fetch paginated payments, total count, metrics and users concurrently
+  const [paginatedResult, totalCount, metrics, users] = await Promise.all([
+    salesRepository.listPaymentsPaginated({
+      pageSize: limit,
+      cursor: currentCursor,
+      startDate,
+      endDate,
+    }),
+    salesRepository.getPaymentsCount({ startDate, endDate }),
+    salesRepository.getActivePaymentsMetricsByDateRange({ startDate, endDate }),
+    userRepository.getAll(),
+  ]);
+
+  const { items: payments, nextCursor, hasMore } = paginatedResult;
+
+  // Fetch unique customer details only for the paginated items
   const uniqueCustomerIds = Array.from(new Set(payments.map((p) => p.customerId).filter(Boolean))) as string[];
   const customersMap = uniqueCustomerIds.length > 0
     ? await customerRepository.getCustomersByIds(uniqueCustomerIds)
     : {};
 
-  // Fetch users to resolve receivedById
-  const users = await userRepository.getAll();
-
   // Enrich payments with customer name and recipient name
   const enrichedPayments = payments.map((payment) => {
     const customer = customersMap[payment.customerId];
     const user = users.find((u) => u.id === payment.receivedById);
+    
+    // Improved user name fallback mapping
+    let receivedByName = "Usuario no registrado";
+    if (user) {
+      receivedByName = user.name;
+    } else if (
+      payment.receivedById === "ADMIN_DIRECT_PAYMENT" ||
+      payment.receivedById === "ADMIN_SYS" ||
+      payment.receivedById === "SYSTEM"
+    ) {
+      receivedByName = "Sistema";
+    }
+
     return {
       ...payment,
       customerName: customer ? customer.name : "Cliente Desconocido",
-      receivedByName: user ? user.name : (payment.receivedById === "ADMIN_DIRECT_PAYMENT" ? "Pago Directo Admin" : "Usuario Desconocido"),
+      receivedByName,
     };
   });
 
@@ -67,8 +96,14 @@ export default async function CollectionsHistoryPage({ searchParams }: PageProps
       </div>
 
       <CollectionsHistoryClient
-        key={`${startDate}_${endDate}`}
+        key={`${startDate}_${endDate}_${cursorsParam}_${limit}`}
         payments={enrichedPayments}
+        nextCursor={nextCursor}
+        hasMore={hasMore}
+        totalCount={totalCount}
+        metrics={metrics}
+        currentCursors={cursorsParam}
+        currentLimit={limit}
         startDate={startDate}
         endDate={endDate}
       />
