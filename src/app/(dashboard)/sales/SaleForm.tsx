@@ -201,7 +201,7 @@ export function SaleForm({
     if (!product) return;
 
     const { price, description } = resolvePrice(
-      customer?.customPrices as any,
+      customer?.customPrices,
       product as any,
       itemType as ItemSaleType,
     );

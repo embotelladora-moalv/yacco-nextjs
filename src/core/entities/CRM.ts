@@ -58,11 +58,20 @@ export interface Customer {
   lastSaleDate?: string | null;
   monetaryDebt?: number;
 
-  // 🔥 AGREGA ESTA LÍNEA AQUÍ:
   alwaysRequiresBilling?: boolean;
+
+  customPrices?: CustomPrice[];
 
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface CustomPrice {
+  productId: string;
+  productName: string;
+  refillPrice?: number;
+  fullPrice?: number;
+  bottlePrice?: number;
 }
 
 // ---------------------------------------------------------
