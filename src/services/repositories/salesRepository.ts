@@ -1374,6 +1374,85 @@ export const salesRepository = {
     return results;
   },
 
+  async getTopCustomersByVolumeCurrentMonth(limitCount = 10): Promise<Array<{ customerId: string; customerName: string; total: number }>> {
+    const peruNow = getPeruNow();
+    const currentYear = peruNow.getUTCFullYear();
+    const currentMonth = peruNow.getUTCMonth();
+
+    const startTs = getPeruMonthStartUtc(currentYear, currentMonth);
+    let endTs: admin.firestore.Timestamp;
+    
+    if (currentMonth === 11) {
+      endTs = getPeruMonthStartUtc(currentYear + 1, 0);
+    } else {
+      endTs = getPeruMonthStartUtc(currentYear, currentMonth + 1);
+    }
+
+    const customerStats = new Map<string, { name: string; total: number }>();
+    
+    let lastDoc: admin.firestore.QueryDocumentSnapshot | undefined = undefined;
+    let hasMore = true;
+    const BATCH_SIZE = 500;
+
+    while (hasMore) {
+      let query = adminDb.collection(SALES_COLLECTION)
+        .where("status", "==", "COMPLETED")
+        .where("createdAt", ">=", startTs)
+        .where("createdAt", "<", endTs)
+        .orderBy("createdAt", "desc")
+        .limit(BATCH_SIZE);
+
+      if (lastDoc) {
+        query = query.startAfter(lastDoc);
+      }
+
+      const snapshot = await query.get();
+
+      if (snapshot.empty) {
+        hasMore = false;
+        break;
+      }
+
+      snapshot.docs.forEach(doc => {
+        const saleData = doc.data();
+        const customerId = saleData.customerId;
+        if (!customerId) return;
+
+        let nameToUse = "Cliente Desconocido";
+        if (saleData.customerAlias) {
+          nameToUse = `${saleData.customerName} (${saleData.customerAlias})`;
+        } else if (saleData.customerName) {
+          nameToUse = saleData.customerName;
+        } else {
+          nameToUse = `Cliente (${customerId})`;
+        }
+
+        const current = customerStats.get(customerId) || { name: nameToUse, total: 0 };
+        customerStats.set(customerId, {
+          name: current.name, // keep the first found name
+          total: current.total + (saleData.totalAmount || 0)
+        });
+      });
+
+      lastDoc = snapshot.docs[snapshot.docs.length - 1];
+      if (snapshot.docs.length < BATCH_SIZE) {
+        hasMore = false;
+      }
+    }
+
+    const results = Array.from(customerStats.entries()).map(([customerId, stats]) => {
+      return {
+        customerId,
+        customerName: stats.name,
+        total: stats.total
+      };
+    });
+
+    results.sort((a, b) => b.total - a.total);
+
+    return results.slice(0, limitCount);
+  },
+
   async cancelSale(
     saleId: string,
     cancelledByUid: string,

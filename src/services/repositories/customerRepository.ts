@@ -302,6 +302,27 @@ export const customerRepository = {
     };
   },
 
+  async getTopDebtors(limitCount = 10): Promise<Array<{ id: string; name: string; alias?: string; debtAmount: number }>> {
+    const snapshot = await adminDb
+      .collection(CUSTOMERS_COLLECTION)
+      .where("isActive", "==", true)
+      .where("debtAmount", ">", 0)
+      .orderBy("debtAmount", "desc")
+      .limit(limitCount)
+      .select("name", "alias", "debtAmount")
+      .get();
+
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return serializeFirestoreData({
+        id: doc.id,
+        name: data.name,
+        alias: data.alias,
+        debtAmount: data.debtAmount,
+      }) as { id: string; name: string; alias?: string; debtAmount: number };
+    });
+  },
+
   async adjustContainerBalances(
     customerId: string,
     newBalances: { productId: string; balance: number }[],
