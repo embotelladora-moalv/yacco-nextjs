@@ -9,6 +9,11 @@ import {
   calculateDebtToReverse,
   reverseManifestItems,
 } from "@/core/use-cases/sales/saleReversal";
+import {
+  allocatePaymentFIFO,
+  allocatePaymentDirected,
+  validateDirectedAllocations,
+} from "@/core/use-cases/collections/paymentAllocation";
 import { serializeFirestoreData } from "@/services/firebase/serialization";
 import { paginate, PaginatedResult } from "./_pagination";
 
@@ -638,8 +643,6 @@ export const salesRepository = {
       const appliedTo: { saleId: string; amountApplied: number }[] = [];
 
       if (data.allocationMode === "DIRECTED") {
-        let totalAllocationsSum = 0;
-
         // 1. Validaciones y lecturas
         const allocationSaleRefs = (data.allocations || []).map((a: { saleId: string; amount: number }) =>
           adminDb.collection(SALES_COLLECTION).doc(a.saleId)
@@ -648,6 +651,8 @@ export const salesRepository = {
         const saleDocs = allocationSaleRefs.length > 0
           ? await transaction.getAll(...allocationSaleRefs)
           : [];
+
+        const salesList: any[] = [];
 
         for (let i = 0; i < (data.allocations || []).length; i++) {
           const alloc = data.allocations[i];
@@ -669,38 +674,36 @@ export const salesRepository = {
             throw new Error(`La venta ${alloc.saleId} ya está cobrada o no está pendiente.`);
           }
 
-          const currentBalance = sale.remainingBalance ?? sale.totalAmount;
-          if (alloc.amount > currentBalance + 0.001) {
-            throw new Error(`El abono asignado (S/ ${alloc.amount}) excede el saldo pendiente (S/ ${currentBalance}) de la venta ${alloc.saleId}.`);
-          }
-
-          totalAllocationsSum += alloc.amount;
+          salesList.push({
+            id: saleDoc.id,
+            totalAmount: sale.totalAmount,
+            remainingBalance: sale.remainingBalance,
+          });
         }
 
-        if (Math.abs(totalAllocationsSum - data.amount) > 0.01) {
-          throw new Error(`La suma de asignaciones (S/ ${totalAllocationsSum.toFixed(2)}) no coincide con el monto total pagado (S/ ${data.amount.toFixed(2)}).`);
+        // Ejecutar validación pura
+        const validation = validateDirectedAllocations(data.amount, data.allocations || [], salesList);
+        if (!validation.valid) {
+          throw new Error(validation.error);
         }
 
-        // 2. Escrituras
-        for (let i = 0; i < (data.allocations || []).length; i++) {
-          const alloc = data.allocations[i];
-          const saleDoc = saleDocs[i];
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const sale = saleDoc.data() as any;
-          const currentBalance = sale.remainingBalance ?? sale.totalAmount;
+        // 2. Ejecutar asignación de pago pura
+        const allocationResults = allocatePaymentDirected(data.amount, data.allocations || [], salesList);
 
-          const newBalance = Math.max(0, currentBalance - alloc.amount);
-          const newStatus = newBalance === 0 ? "PAID" : "PARTIAL";
+        // 3. Aplicar escrituras
+        for (const res of allocationResults) {
+          const saleDoc = saleDocs.find((doc) => doc.id === res.saleId);
+          if (!saleDoc) continue;
 
           transaction.update(saleDoc.ref, {
-            remainingBalance: newBalance,
-            paymentStatus: newStatus,
+            remainingBalance: res.newRemainingBalance,
+            paymentStatus: res.newPaymentStatus,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
 
           appliedTo.push({
-            saleId: alloc.saleId,
-            amountApplied: alloc.amount,
+            saleId: res.saleId,
+            amountApplied: res.amountApplied,
           });
         }
       } else {
@@ -714,39 +717,30 @@ export const salesRepository = {
 
         const pendingSnap = await transaction.get(pendingQuery);
 
-        let amountToDistribute = data.amount;
+        const salesList = pendingSnap.docs.map((doc) => {
+          const s = doc.data();
+          return {
+            id: doc.id,
+            totalAmount: s.totalAmount,
+            remainingBalance: s.remainingBalance,
+          };
+        });
 
-        for (const doc of pendingSnap.docs) {
-          if (amountToDistribute <= 0) break;
+        const allocationResults = allocatePaymentFIFO(data.amount, salesList);
 
-          const sale = doc.data();
-          const currentBalance = sale.remainingBalance ?? sale.totalAmount;
-          let appliedInThisTicket = 0;
+        for (const res of allocationResults) {
+          const doc = pendingSnap.docs.find((d) => d.id === res.saleId);
+          if (!doc) continue;
 
-          if (amountToDistribute >= currentBalance) {
-            appliedInThisTicket = currentBalance;
-            amountToDistribute -= currentBalance;
-
-            transaction.update(doc.ref, {
-              remainingBalance: 0,
-              paymentStatus: "PAID",
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-          } else {
-            appliedInThisTicket = amountToDistribute;
-            const newBalance = currentBalance - amountToDistribute;
-            amountToDistribute = 0;
-
-            transaction.update(doc.ref, {
-              remainingBalance: newBalance,
-              paymentStatus: "PARTIAL",
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-          }
+          transaction.update(doc.ref, {
+            remainingBalance: res.newRemainingBalance,
+            paymentStatus: res.newPaymentStatus,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
 
           appliedTo.push({
-            saleId: doc.id,
-            amountApplied: appliedInThisTicket,
+            saleId: res.saleId,
+            amountApplied: res.amountApplied,
           });
         }
       }
