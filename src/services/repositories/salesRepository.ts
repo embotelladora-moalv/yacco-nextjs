@@ -1220,6 +1220,74 @@ export const salesRepository = {
     return allSales;
   },
 
+  /**
+   * Agrega ingresos mensuales (Facturado vs Cobrado) para el dashboard.
+   * Excluye data legacy filtrando por status "COMPLETED".
+   * Forzado a zona horaria Perú (UTC-5) sin librerías.
+   */
+  async getMonthlyRevenue(monthsBack = 6): Promise<Array<{ month: string; billed: number; cash: number; digital: number }>> {
+    const results = [];
+    
+    // 1. Obtener "ahora" en Perú (UTC-5 fijo)
+    // Desplazamos el instante actual -5 horas para derivar el año/mes local usando getUTC*
+    const OFFSET_PERU_MS = 5 * 60 * 60 * 1000;
+    const peruNow = new Date(Date.now() - OFFSET_PERU_MS);
+    const currentYear = peruNow.getUTCFullYear();
+    const currentMonth = peruNow.getUTCMonth(); // 0-11
+
+    // 2. Función auxiliar para obtener el inicio de un mes (medianoche Perú) en instante UTC
+    const getPeruMonthStartUtc = (year: number, monthIndex: number) => {
+      // Medianoche 00:00:00 del día 1 en Perú = 05:00:00 UTC del mismo día
+      return admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, monthIndex, 1, 5, 0, 0, 0)));
+    };
+
+    // 3. Iterar hacia atrás
+    for (let i = monthsBack - 1; i >= 0; i--) {
+      // Calcular año/mes objetivo para esta iteración
+      const targetDate = new Date(Date.UTC(currentYear, currentMonth - i, 1));
+      const targetYear = targetDate.getUTCFullYear();
+      const targetMonth = targetDate.getUTCMonth();
+
+      const startTs = getPeruMonthStartUtc(targetYear, targetMonth);
+      const endTs = getPeruMonthStartUtc(targetYear, targetMonth + 1);
+
+      const query = adminDb.collection(SALES_COLLECTION)
+        .where("status", "==", "COMPLETED")
+        .where("createdAt", ">=", startTs)
+        .where("createdAt", "<", endTs);
+
+      try {
+        const aggSnapshot = await query.aggregate({
+          totalBilled: admin.firestore.AggregateField.sum("totalAmount"),
+          totalCash: admin.firestore.AggregateField.sum("cashReceived"),
+          totalDigital: admin.firestore.AggregateField.sum("digitalReceived"),
+        }).get();
+
+        const data = aggSnapshot.data();
+        
+        // Etiqueta alineada con los bordes usados
+        const monthLabel = `${targetYear}-${String(targetMonth + 1).padStart(2, "0")}`;
+
+        results.push({
+          month: monthLabel,
+          billed: data.totalBilled || 0,
+          cash: data.totalCash || 0,
+          digital: data.totalDigital || 0,
+        });
+      } catch (err) {
+        console.error(`Error aggregating month ${targetYear}-${targetMonth + 1}:`, err);
+        results.push({
+          month: `${targetYear}-${String(targetMonth + 1).padStart(2, "0")}`,
+          billed: 0,
+          cash: 0,
+          digital: 0,
+        });
+      }
+    }
+
+    return results;
+  },
+
   async cancelSale(
     saleId: string,
     cancelledByUid: string,
