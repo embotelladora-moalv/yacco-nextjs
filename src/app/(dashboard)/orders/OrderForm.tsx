@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Customer } from "@/core/entities/CRM";
 import { Product } from "@/core/entities/Inventory";
+import { resolvePrice, ItemSaleType } from "@/core/use-cases/sales/resolvePrice";
 import { OrderFormValues, orderSchema } from "@/core/validations/orderSchema";
 import { PRICE_STEP } from "@/core/utils/priceConfig";
 
@@ -133,28 +134,14 @@ export function OrderForm({
 
     if (!product) return;
 
-    let price = 0;
-    let desc = product.name;
-    const customPrice = (customer as any)?.customPrices?.find(
-      (cp: any) => cp.productId === productId,
+    const { price, description } = resolvePrice(
+      customer?.customPrices as any,
+      product as any,
+      itemType as ItemSaleType,
     );
 
-    if (itemType === "REFILL") {
-      price = customPrice?.refillPrice || product.priceRefill || 0;
-      desc = `Recarga de ${product.name}`;
-    } else if (itemType === "FULL") {
-      price = customPrice?.fullPrice || product.priceFull || 0;
-      desc = `Venta Nueva de ${product.name}`;
-    } else if (itemType === "BOTTLE") {
-      price = customPrice?.bottlePrice || product.priceEmpty || 0;
-      desc = `Envase Vacío de ${product.name}`;
-    } else if (itemType === "STANDARD") {
-      price = product.priceFull || 0;
-      desc = product.name;
-    }
-
     form.setValue(`items.${index}.unitPrice`, price, { shouldValidate: true });
-    form.setValue(`items.${index}.description`, desc, { shouldValidate: true });
+    form.setValue(`items.${index}.description`, description, { shouldValidate: true });
   };
 
   return (
