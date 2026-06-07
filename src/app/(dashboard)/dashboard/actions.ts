@@ -18,3 +18,14 @@ export async function getMonthlyRevenueAction(monthsBack = 6) {
     return { success: false, error: "Error al obtener datos de ingresos mensuales" };
   }
 }
+
+export async function getProductSalesAction() {
+  try {
+    const data = await salesRepository.getProductSalesCurrentMonth();
+    return { success: true, data };
+  } catch (error) {
+    console.error("Error in getProductSalesAction:", error);
+    return { success: false, error: "Error al obtener las ventas por producto del mes actual" };
+  }
+}
+
