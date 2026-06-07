@@ -5,12 +5,7 @@
  * based on the customer's custom price list and the product's base price.
  */
 
-export type CustomPrice = {
-  productId: string;
-  refillPrice?: number;
-  fullPrice?: number;
-  bottlePrice?: number;
-};
+import type { CustomPrice } from "@/core/entities/CRM";
 
 export type PricingProduct = {
   id: string;
