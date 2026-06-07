@@ -64,3 +64,4 @@ firestore-debug.log*
 # Data exports and backups
 firebase-data/
 /scripts/cleanup/backup-*/
+/scripts/verify/*.txt
