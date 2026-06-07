@@ -190,6 +190,14 @@
         { "fieldPath": "isActive", "order": "ASCENDING" },
         { "fieldPath": "name", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "customers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "debtAmount", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
