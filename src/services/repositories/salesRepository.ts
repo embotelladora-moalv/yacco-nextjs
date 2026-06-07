@@ -10,7 +10,7 @@ import {
   reverseManifestItems,
 } from "@/core/use-cases/sales/saleReversal";
 import { serializeFirestoreData } from "@/services/firebase/serialization";
-import { paginate } from "./_pagination";
+import { paginate, PaginatedResult } from "./_pagination";
 
 const SALES_COLLECTION = "sales";
 const CUSTOMERS_COLLECTION = "customers";
@@ -799,6 +799,112 @@ export const salesRepository = {
         ...doc.data(),
       });
     });
+  },
+
+  async listPaymentsPaginated(options: {
+    pageSize: number;
+    cursor?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<PaginatedResult<any>> {
+    let query: admin.firestore.Query = adminDb.collection("debtPayments");
+
+    if (options.startDate) {
+      const startTimestamp = admin.firestore.Timestamp.fromDate(
+        new Date(`${options.startDate}T00:00:00-05:00`)
+      );
+      query = query.where("createdAt", ">=", startTimestamp);
+    }
+    if (options.endDate) {
+      const endTimestamp = admin.firestore.Timestamp.fromDate(
+        new Date(`${options.endDate}T23:59:59-05:00`)
+      );
+      query = query.where("createdAt", "<=", endTimestamp);
+    }
+
+    query = query
+      .orderBy("createdAt", "desc")
+      .orderBy("__name__", "desc");
+
+    return await paginate<any>(
+      query,
+      options,
+      ["createdAt", "id"],
+      (doc) => {
+        return serializeFirestoreData({
+          id: doc.id,
+          ...doc.data(),
+        });
+      }
+    );
+  },
+
+  async getPaymentsCount(options: {
+    startDate?: string;
+    endDate?: string;
+  }): Promise<number> {
+    let query: admin.firestore.Query = adminDb.collection("debtPayments");
+
+    if (options.startDate) {
+      const startTimestamp = admin.firestore.Timestamp.fromDate(
+        new Date(`${options.startDate}T00:00:00-05:00`)
+      );
+      query = query.where("createdAt", ">=", startTimestamp);
+    }
+    if (options.endDate) {
+      const endTimestamp = admin.firestore.Timestamp.fromDate(
+        new Date(`${options.endDate}T23:59:59-05:00`)
+      );
+      query = query.where("createdAt", "<=", endTimestamp);
+    }
+
+    const snapshot = await query.count().get();
+    return snapshot.data().count;
+  },
+
+  async getActivePaymentsMetricsByDateRange(options: {
+    startDate?: string;
+    endDate?: string;
+  }): Promise<{ totalCollected: number; totalCash: number; totalTransfer: number; totalYapePlin: number }> {
+    let query: admin.firestore.Query = adminDb.collection("debtPayments");
+
+    if (options.startDate) {
+      const startTimestamp = admin.firestore.Timestamp.fromDate(
+        new Date(`${options.startDate}T00:00:00-05:00`)
+      );
+      query = query.where("createdAt", ">=", startTimestamp);
+    }
+    if (options.endDate) {
+      const endTimestamp = admin.firestore.Timestamp.fromDate(
+        new Date(`${options.endDate}T23:59:59-05:00`)
+      );
+      query = query.where("createdAt", "<=", endTimestamp);
+    }
+
+    const snapshot = await query.select("amount", "paymentMethod", "status").get();
+    
+    let totalCollected = 0;
+    let totalCash = 0;
+    let totalTransfer = 0;
+    let totalYapePlin = 0;
+
+    snapshot.docs.forEach((doc) => {
+      const data = doc.data();
+      if (data.status !== "ACTIVE") return;
+      
+      const amount = Number(data.amount || 0);
+      totalCollected += amount;
+      
+      if (data.paymentMethod === "CASH") {
+        totalCash += amount;
+      } else if (data.paymentMethod === "TRANSFER") {
+        totalTransfer += amount;
+      } else if (data.paymentMethod === "YAPE_PLIN") {
+        totalYapePlin += amount;
+      }
+    });
+
+    return { totalCollected, totalCash, totalTransfer, totalYapePlin };
   },
 
   async cancelPayment(
