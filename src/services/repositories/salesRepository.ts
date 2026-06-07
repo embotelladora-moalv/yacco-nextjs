@@ -24,6 +24,16 @@ const PRODUCTS_COLLECTION = "products";
 const PRODUCTION_COLLECTION = "productionBatches";
 const CUSTOMER_CONTAINER_LOGS_COLLECTION = "customerContainerLogs";
 
+const OFFSET_PERU_MS = 5 * 60 * 60 * 1000;
+
+function getPeruNow() {
+  return new Date(Date.now() - OFFSET_PERU_MS);
+}
+
+function getPeruMonthStartUtc(year: number, monthIndex: number) {
+  return admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, monthIndex, 1, 5, 0, 0, 0)));
+}
+
 export const salesRepository = {
   /**
    * Registra una venta atómica.
@@ -1228,18 +1238,10 @@ export const salesRepository = {
   async getMonthlyRevenue(monthsBack = 6): Promise<Array<{ month: string; billed: number; cash: number; digital: number }>> {
     const results = [];
     
-    // 1. Obtener "ahora" en Perú (UTC-5 fijo)
-    // Desplazamos el instante actual -5 horas para derivar el año/mes local usando getUTC*
-    const OFFSET_PERU_MS = 5 * 60 * 60 * 1000;
-    const peruNow = new Date(Date.now() - OFFSET_PERU_MS);
+    // 1. Obtener "ahora" en Perú (UTC-5 fijo) usando helper global
+    const peruNow = getPeruNow();
     const currentYear = peruNow.getUTCFullYear();
     const currentMonth = peruNow.getUTCMonth(); // 0-11
-
-    // 2. Función auxiliar para obtener el inicio de un mes (medianoche Perú) en instante UTC
-    const getPeruMonthStartUtc = (year: number, monthIndex: number) => {
-      // Medianoche 00:00:00 del día 1 en Perú = 05:00:00 UTC del mismo día
-      return admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, monthIndex, 1, 5, 0, 0, 0)));
-    };
 
     // 3. Iterar hacia atrás
     for (let i = monthsBack - 1; i >= 0; i--) {
@@ -1284,6 +1286,90 @@ export const salesRepository = {
         });
       }
     }
+
+    return results;
+  },
+
+  async getProductSalesCurrentMonth(): Promise<Array<{ productId: string; productName: string; units: number; billed: number }>> {
+    const peruNow = getPeruNow();
+    const currentYear = peruNow.getUTCFullYear();
+    const currentMonth = peruNow.getUTCMonth();
+
+    const startTs = getPeruMonthStartUtc(currentYear, currentMonth);
+    let endTs: admin.firestore.Timestamp;
+    
+    if (currentMonth === 11) {
+      endTs = getPeruMonthStartUtc(currentYear + 1, 0);
+    } else {
+      endTs = getPeruMonthStartUtc(currentYear, currentMonth + 1);
+    }
+
+    // 1. Obtener todos los productos (aprox 7 docs) para cruce
+    const productsSnapshot = await adminDb.collection(PRODUCTS_COLLECTION).get();
+    const productsMap = new Map<string, string>();
+    productsSnapshot.docs.forEach(doc => {
+      productsMap.set(doc.id, doc.data().name || "Producto sin nombre");
+    });
+
+    // 2. Acumular ventas por producto
+    const productStats = new Map<string, { units: number; billed: number }>();
+    
+    let lastDoc: admin.firestore.QueryDocumentSnapshot | undefined = undefined;
+    let hasMore = true;
+    const BATCH_SIZE = 500;
+
+    while (hasMore) {
+      let query = adminDb.collection(SALES_COLLECTION)
+        .where("status", "==", "COMPLETED")
+        .where("createdAt", ">=", startTs)
+        .where("createdAt", "<", endTs)
+        .orderBy("createdAt", "desc")
+        .limit(BATCH_SIZE);
+
+      if (lastDoc) {
+        query = query.startAfter(lastDoc);
+      }
+
+      const snapshot = await query.get();
+
+      if (snapshot.empty) {
+        hasMore = false;
+        break;
+      }
+
+      snapshot.docs.forEach(doc => {
+        const saleData = doc.data();
+        const items = saleData.items || [];
+        
+        items.forEach((item: any) => {
+          if (!item.productId) return;
+          const current = productStats.get(item.productId) || { units: 0, billed: 0 };
+          productStats.set(item.productId, {
+            units: current.units + (item.quantity || 0),
+            billed: current.billed + (item.subtotal || 0)
+          });
+        });
+      });
+
+      lastDoc = snapshot.docs[snapshot.docs.length - 1];
+      if (snapshot.docs.length < BATCH_SIZE) {
+        hasMore = false;
+      }
+    }
+
+    // 3. Formatear salida con nombre y orden
+    const results = Array.from(productStats.entries()).map(([productId, stats]) => {
+      const productName = productsMap.get(productId) || `Producto desconocido (${productId})`;
+      return {
+        productId,
+        productName,
+        units: stats.units,
+        billed: stats.billed
+      };
+    });
+
+    // Ordenar por facturado descendente
+    results.sort((a, b) => b.billed - a.billed);
 
     return results;
   },
