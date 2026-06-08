@@ -1,10 +1,19 @@
+export interface ShrinkageReason {
+  id: string;
+  name: string;
+  context: "ROUTE" | "PLANT";
+  phase: "FILLED" | "EMPTY";
+  isRecyclableDefault: boolean;
+  isActive: boolean;
+}
+
 export interface SystemSettings {
   clientTags: string[];
-  productionWasteReasons: string[];
-  routeWasteReasons: string[];
+  productionWasteReasons: ShrinkageReason[];
+  routeWasteReasons: ShrinkageReason[];
   bottleChangeReasons: string[];
   debtReasons: string[];
-  packagingTypes: string[]; // <--- Agrega esta línea
+  packagingTypes: string[];
   maquilaBrands: string[];
   updatedAt: Date;
 }
