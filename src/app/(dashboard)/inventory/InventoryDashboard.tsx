@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Product } from "@/core/entities/Inventory";
+import { Product, ProductionBatch } from "@/core/entities/Inventory";
+import { ShrinkageReason } from "@/core/entities/SystemSettings";
 import { Button } from "@/components/ui/button";
 import {
   Package,
@@ -18,6 +19,7 @@ import {
 import Link from "next/link";
 import { ProductionModal } from "./ProductionModal";
 import { EmptyIntakeModal } from "./EmptyIntakeModal";
+import { ShrinkageModal } from "./ShrinkageModal";
 import { KardexSection } from "./KardexSection";
 import {
   DropdownMenu,
@@ -29,10 +31,17 @@ import {
 import { toast } from "sonner";
 import { toggleProductStatusAction } from "./actions";
 
-export function InventoryDashboard({ products }: { products: Product[] }) {
+interface InventoryDashboardProps {
+  products: Product[];
+  batches: ProductionBatch[];
+  wasteReasons: ShrinkageReason[];
+}
+
+export function InventoryDashboard({ products, batches, wasteReasons }: InventoryDashboardProps) {
   const [showOnlyActive, setShowOnlyActive] = useState(true);
   const [isProductionOpen, setIsProductionOpen] = useState(false);
   const [isIntakeOpen, setIsIntakeOpen] = useState(false);
+  const [isShrinkageOpen, setIsShrinkageOpen] = useState(false);
 
   const filteredProducts = showOnlyActive
     ? products.filter((product) => product.isActive)
@@ -66,6 +75,14 @@ export function InventoryDashboard({ products }: { products: Product[] }) {
             onOpenChange={setIsIntakeOpen}
             showTrigger={false}
           />
+          <ShrinkageModal
+            products={products}
+            batches={batches}
+            wasteReasons={wasteReasons}
+            open={isShrinkageOpen}
+            onOpenChange={setIsShrinkageOpen}
+            showTrigger={false}
+          />
 
           {/* Menú de Opciones de Producción / Planta */}
           <DropdownMenu>
@@ -97,6 +114,14 @@ export function InventoryDashboard({ products }: { products: Product[] }) {
               >
                 <ArrowDownToLine className="h-4 w-4 text-green-500" />
                 Ingresar Vacíos
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                onClick={() => setIsShrinkageOpen(true)}
+                className="cursor-pointer flex items-center gap-2 p-2.5 rounded-lg hover:bg-slate-50 text-slate-800 hover:text-slate-900 transition-colors"
+              >
+                <Trash2 className="h-4 w-4 text-red-500" />
+                Registrar merma de planta
               </DropdownMenuItem>
 
               <DropdownMenuItem asChild>

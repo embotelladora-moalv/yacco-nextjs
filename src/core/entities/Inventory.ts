@@ -54,8 +54,10 @@ export interface ShrinkageLog {
   id: string;
   productId: string;
   quantity: number;
-  phase: "EMPTY" | "FILLED"; // ¿Se rompió el vacío al lavarlo o el lleno en ruta?
+  phase: "EMPTY" | "FILLED"; // ¿Se rompió el vacío al lavarlo o el lleno en ruta/planta?
   reasonId: string; // Motivo gestionable (ej: "Caño roto")
+  isRecyclable: boolean; // Si el envase se puede recuperar
+  lotNumber?: string; // Requerido si phase === "FILLED"
   managerId: string;
   createdAt: Date;
 }
