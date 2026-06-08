@@ -190,7 +190,18 @@ el cierre.
 
 ---
 
-## 5. Verificaciones obligatorias (todas las fases)
+## 7. Estado de ejecución
+
+- **Fase 0: HECHA** (catálogo motivos a objetos + flag reciclable + UI settings + normalización legacy).
+- **Fase 1: HECHA** (merma con motivo en ruta + Kardex SHRINKAGE; FILLED traza delta-0, EMPTY reciclable delta real).
+- **Fase 2: HECHA** (cuadre visible contra ventas reales por lote + UNRECONCILED_LOSS delta-0; NO bloquea cierre).
+- **Fase 3a: HECHA** (merma de planta, registerShrinkage activado; por lote, reciclable, kardex DELTA REAL —planta descuenta de verdad, distinto de ruta—, validación lote-primero, permiso ADMIN/PRODUCTION).
+- **Fase 3b (corrección de carga): RESUELTA SIN CÓDIGO.** El pit-stop (advancedReloadDispatch, /dispatch/[id]/pit-stop) ya cubre ambas direcciones en ON_ROUTE. Decisión: usar pit-stop como estándar. NOTA: "anoté de más" se registra como quantityReturnedFull (no corrección semántica), deuda menor aceptada, stock cuadra. PENDIENTE no-código: documentar para el usuario.
+- **Fase 3c (anulación post-liquidación): PENDIENTE**, la más delicada, aún sin grillar.
+
+---
+
+## 8. Verificaciones obligatorias (todas las fases)
 
 - Solo-lectura primero para confirmar estado real antes de tocar.
 - Scripts destructivos: dry-run + backup local + confirmar projectId + abortar
