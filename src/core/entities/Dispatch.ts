@@ -8,7 +8,12 @@ export interface DispatchItem {
   quantitySold: number; // Cuántos se entregaron a los clientes
   quantityReturnedFull: number; // Cuántos sobraron y regresan intactos al almacén
   quantityReturnedEmpty?: number; // Para el resumen final de vacíos por producto
-  wasteQuantity: number; // Cuántos se rompieron o perdieron en la ruta
+  wasteQuantity: number; // Cuántos se rompieron o perdieron en la ruta (Suma de waste[].quantity)
+  waste?: {
+    quantity: number;
+    reasonId: string;
+    isRecyclable: boolean;
+  }[];
 }
 
 // Detalle de los vacíos que el chofer trae de regreso en la tarde

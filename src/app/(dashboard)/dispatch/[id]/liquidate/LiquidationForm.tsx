@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useForm, useFieldArray } from "react-hook-form";
+import { useForm, useFieldArray, UseFormReturn } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   liquidationManifestSchema,
@@ -32,31 +32,37 @@ import {
   Clock,
   CheckCircle2,
   Package,
+  X,
+  RefreshCw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { ShrinkageReason } from "@/core/entities/SystemSettings";
+import { Switch } from "@/components/ui/switch";
 
 interface LiquidationFormProps {
   manifest: any;
   products: Product[];
   sales: any[];
+  wasteReasons: ShrinkageReason[];
 }
 
 export function LiquidationForm({
   manifest,
   products,
   sales,
+  wasteReasons,
 }: LiquidationFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Filtramos solo los Pit Stops que tienen rendición o vacíos para el historial rápido
   const pitStopsHistory = useMemo(() => {
-    return (manifest.pitStops || []).filter(
+    return (manifest.pitStopsHistory || []).filter(
       (p: any) =>
         (p.cashHandover || 0) > 0 || (p.returnedEmpties || []).length > 0,
     );
-  }, [manifest.pitStops]);
+  }, [manifest.pitStopsHistory]);
 
   // 1. SUGERENCIAS AUTOMÁTICAS: Consolidamos lo cargado vs lo vendido en boletas
   const suggestedItems = useMemo(() => {
@@ -79,12 +85,10 @@ export function LiquidationForm({
         lotNumber: loaded.lotNumber,
         quantityLoaded: loaded.quantityLoaded,
         quantityReturnedFull: returnedFull,
-        wasteQuantity: 0,
+        waste: [], // Inicialmente vacío
       };
     });
   }, [manifest.items, sales]);
-
-  const safeItems = useMemo(() => suggestedItems, [suggestedItems]);
 
   const suggestedEmpties = useMemo(() => {
     const emptiesCount: Record<string, number> = {};
@@ -131,21 +135,29 @@ export function LiquidationForm({
   });
 
   const {
+    fields: itemFields,
+  } = useFieldArray({ control: form.control, name: "items" });
+
+  const {
     fields: emptyFields,
     append: appendEmpty,
     remove: removeEmpty,
   } = useFieldArray({ control: form.control, name: "returnedEmpties" });
+
   const getProductName = (id: string) =>
     products.find((p) => p.id === id)?.name || "Producto desconocido";
-  const getProductSku = (id: string) =>
-    products.find((p) => p.id === id)?.sku || "SKU";
-
+  
   const onSubmit = async (values: LiquidationManifestFormValues) => {
+    // Limpieza de datos antes de enviar
     const cleanedValues = {
       ...values,
       returnedEmpties: values.returnedEmpties.filter(
         (e) => e.productId !== "" && e.quantityReturned > 0,
       ),
+      items: values.items.map(item => ({
+        ...item,
+        waste: item.waste.filter(w => w.quantity > 0 && w.reasonId !== "")
+      }))
     };
 
     setIsSubmitting(true);
@@ -192,7 +204,7 @@ export function LiquidationForm({
                     <span className="text-blue-600 font-bold">
                       Bajó Vacíos:{" "}
                       {pit.returnedEmpties?.reduce(
-                        (s: number, e: any) => s + e.quantity,
+                        (s: number, e: any) => s + (e.quantity || e.quantityReturned || 0),
                         0,
                       ) || 0}
                       u.
@@ -218,8 +230,7 @@ export function LiquidationForm({
                 Cuadre de Carga
               </h2>
               <p className="text-xs text-slate-400 font-medium">
-                Indica qué productos regresan llenos y cuántos se perdieron
-                (mermas).
+                Indica qué productos regresan llenos y detalla las mermas (con motivo).
               </p>
             </div>
           </div>
@@ -237,8 +248,8 @@ export function LiquidationForm({
                   <TableHead className="text-center font-bold text-slate-400 uppercase text-[10px] tracking-widest bg-blue-50/50">
                     Retorna Lleno
                   </TableHead>
-                  <TableHead className="text-center font-bold text-slate-400 uppercase text-[10px] tracking-widest bg-red-50/50">
-                    Merma/Faltante
+                  <TableHead className="text-left font-bold text-slate-400 uppercase text-[10px] tracking-widest bg-red-50/50 min-w-[350px]">
+                    Detalle de Mermas / Faltantes
                   </TableHead>
                   <TableHead className="pr-8 text-right font-bold text-slate-400 uppercase text-[10px] tracking-widest">
                     Vendido (Calc)
@@ -246,58 +257,15 @@ export function LiquidationForm({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {safeItems.map((item: any, index: number) => {
-                  const qtyRet = form.watch(`items.${index}.quantityReturnedFull`) || 0;
-                  const qtyWaste = form.watch(`items.${index}.wasteQuantity`) || 0;
-                  const sold = item.quantityLoaded - qtyRet - qtyWaste;
-
-                  return (
-                    <TableRow key={index} className="hover:bg-slate-50/30">
-                      <TableCell className="pl-8 py-4">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-slate-800 text-sm">
-                            {getProductName(item.productId)}
-                          </span>
-                          <span className="text-[10px] font-black text-slate-400 bg-slate-100 w-fit px-1.5 rounded uppercase mt-1">
-                            Lote: {item.lotNumber}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-center font-black text-slate-400">
-                        {item.quantityLoaded}
-                      </TableCell>
-                      <TableCell className="text-center bg-blue-50/20">
-                        <Input
-                          type="number"
-                          {...form.register(`items.${index}.quantityReturnedFull`, {
-                            valueAsNumber: true,
-                          })}
-                          className="w-20 mx-auto h-9 text-center font-black border-blue-100 focus:ring-blue-100"
-                        />
-                      </TableCell>
-                      <TableCell className="text-center bg-red-50/20">
-                        <Input
-                          type="number"
-                          {...form.register(`items.${index}.wasteQuantity`, {
-                            valueAsNumber: true,
-                          })}
-                          className="w-20 mx-auto h-9 text-center font-black border-red-100 focus:ring-red-100"
-                        />
-                      </TableCell>
-                      <TableCell className="pr-8 text-right">
-                        <Badge
-                          className={`font-black ${
-                            sold < 0
-                              ? "bg-red-500 text-white"
-                              : "bg-slate-100 text-slate-600"
-                          }`}
-                        >
-                          {sold} vendidos
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                {itemFields.map((field, index) => (
+                  <ItemRow 
+                    key={field.id}
+                    index={index}
+                    form={form}
+                    getProductName={getProductName}
+                    wasteReasons={wasteReasons}
+                  />
+                ))}
               </TableBody>
             </Table>
           </div>
@@ -534,6 +502,158 @@ export function LiquidationForm({
           </Button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// =========================================================================
+// SUB-COMPONENTES PARA ORGANIZAR EL FORMULARIO
+// =========================================================================
+
+function ItemRow({ 
+  index, 
+  form, 
+  getProductName, 
+  wasteReasons 
+}: { 
+  index: number; 
+  form: UseFormReturn<LiquidationManifestFormValues>; 
+  getProductName: (id: string) => string;
+  wasteReasons: ShrinkageReason[];
+}) {
+  const item = form.watch(`items.${index}`);
+  const qtyRet = form.watch(`items.${index}.quantityReturnedFull`) || 0;
+  
+  const waste = form.watch(`items.${index}.waste`) || [];
+  const totalWaste = waste.reduce((sum, w) => sum + (w.quantity || 0), 0);
+  
+  const sold = item.quantityLoaded - qtyRet - totalWaste;
+
+  return (
+    <TableRow className="hover:bg-slate-50/30 align-top">
+      <TableCell className="pl-8 py-4">
+        <div className="flex flex-col">
+          <span className="font-bold text-slate-800 text-sm">
+            {getProductName(item.productId)}
+          </span>
+          <span className="text-[10px] font-black text-slate-400 bg-slate-100 w-fit px-1.5 rounded uppercase mt-1">
+            Lote: {item.lotNumber}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell className="text-center font-black text-slate-400 py-4">
+        {item.quantityLoaded}
+      </TableCell>
+      <TableCell className="text-center bg-blue-50/20 py-4">
+        <Input
+          type="number"
+          {...form.register(`items.${index}.quantityReturnedFull`, {
+            valueAsNumber: true,
+          })}
+          className="w-20 mx-auto h-9 text-center font-black border-blue-100 focus:ring-blue-100 bg-white"
+        />
+      </TableCell>
+      <TableCell className="text-left bg-red-50/10 py-4">
+        <WasteLinesInput 
+          itemIndex={index} 
+          form={form} 
+          wasteReasons={wasteReasons} 
+        />
+      </TableCell>
+      <TableCell className="pr-8 text-right py-4">
+        <Badge
+          className={`font-black ${
+            sold < 0
+              ? "bg-red-500 text-white"
+              : "bg-slate-100 text-slate-600"
+          }`}
+        >
+          {sold} vendidos
+        </Badge>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function WasteLinesInput({ 
+  itemIndex, 
+  form, 
+  wasteReasons 
+}: { 
+  itemIndex: number; 
+  form: UseFormReturn<LiquidationManifestFormValues>;
+  wasteReasons: ShrinkageReason[];
+}) {
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: `items.${itemIndex}.waste` as any,
+  });
+
+  const handleAddWaste = () => {
+    append({ quantity: 0, reasonId: "", isRecyclable: false });
+  };
+
+  const handleReasonChange = (wIndex: number, reasonId: string) => {
+    const reason = wasteReasons.find(r => r.id === reasonId);
+    if (reason) {
+      form.setValue(`items.${itemIndex}.waste.${wIndex}.isRecyclable` as any, reason.isRecyclableDefault);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      {fields.map((field, wIndex) => (
+        <div key={field.id} className="flex items-center gap-2 bg-white/50 p-2 rounded-lg border border-red-100/50">
+          <div className="flex-1">
+            <select
+              {...form.register(`items.${itemIndex}.waste.${wIndex}.reasonId` as any)}
+              onChange={(e) => handleReasonChange(wIndex, e.target.value)}
+              className="w-full h-8 bg-white border border-slate-200 rounded-md px-2 text-[11px] font-bold outline-none"
+            >
+              <option value="">Motivo...</option>
+              {wasteReasons.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="w-16">
+            <Input
+              type="number"
+              placeholder="Cant."
+              {...form.register(`items.${itemIndex}.waste.${wIndex}.quantity` as any, { valueAsNumber: true })}
+              className="h-8 bg-white border-slate-200 rounded-md font-black text-center text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-md border border-slate-100">
+            <span className="text-[9px] font-black text-slate-400 uppercase">Recic.</span>
+            <Switch 
+              checked={form.watch(`items.${itemIndex}.waste.${wIndex}.isRecyclable` as any)}
+              onCheckedChange={(val) => form.setValue(`items.${itemIndex}.waste.${wIndex}.isRecyclable` as any, val)}
+              className="scale-75"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => remove(wIndex)}
+            className="h-8 w-8 rounded-md text-red-400 hover:text-red-600 hover:bg-red-50 p-0"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={handleAddWaste}
+        className="text-[10px] font-bold text-red-500 hover:bg-red-50 h-7 rounded-md"
+      >
+        <Plus className="h-3 w-3 mr-1" /> Agregar merma
+      </Button>
     </div>
   );
 }

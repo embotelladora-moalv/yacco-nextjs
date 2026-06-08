@@ -1,6 +1,7 @@
 import { dispatchRepository } from "@/services/repositories/dispatchRepository";
 import { inventoryRepository } from "@/services/repositories/inventoryRepository";
 import { financeRepository } from "@/services/repositories/financeRepository";
+import { settingsRepository } from "@/services/repositories/settingsRepository";
 import { adminDb } from "@/services/firebase/admin";
 import { notFound } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -23,8 +24,13 @@ export default async function LiquidatePage({
     notFound();
   }
 
-  // 2. Obtener los Productos
-  const products = await inventoryRepository.getAllProducts();
+  // 2. Obtener los Productos y Motivos
+  const [products, settings] = await Promise.all([
+    inventoryRepository.getAllProducts(),
+    settingsRepository.getSettings(),
+  ]);
+
+  const wasteReasons = (settings.routeWasteReasons || []).filter(r => r.isActive);
 
   // 3. Obtener Ventas asociadas a este camión (Para sugerir el retorno automático)
   const salesSnapshot = await adminDb
@@ -64,7 +70,12 @@ export default async function LiquidatePage({
       </div>
 
       {/* PASAMOS LAS VENTAS AL FORMULARIO */}
-      <LiquidationForm manifest={manifest} products={products} sales={sales} />
+      <LiquidationForm 
+        manifest={manifest} 
+        products={products} 
+        sales={sales} 
+        wasteReasons={wasteReasons}
+      />
     </div>
   );
 }
