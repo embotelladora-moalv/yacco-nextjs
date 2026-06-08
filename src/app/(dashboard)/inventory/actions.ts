@@ -5,6 +5,8 @@ import {
   ProductionBatchFormValues,
   productionBatchSchema,
   productSchema,
+  shrinkageSchema,
+  ShrinkageFormValues,
 } from "@/core/validations/inventorySchemas";
 import { inventoryRepository } from "@/services/repositories/inventoryRepository";
 import { revalidatePath } from "next/cache";
@@ -113,3 +115,34 @@ export async function toggleProductStatusAction(id: string, isActive: boolean) {
     return { success: false, error: error.message };
   }
 }
+
+export async function registerShrinkageAction(data: ShrinkageFormValues) {
+  try {
+    const session = await getUserSession();
+    if (!session) {
+      return { success: false, error: "Sesión inválida. Vuelve a iniciar sesión." };
+    }
+
+    if (!session.roles.includes("ADMIN") && !session.roles.includes("PRODUCTION")) {
+      return { success: false, error: "No tiene permisos para registrar mermas de planta." };
+    }
+
+    const parsed = shrinkageSchema.parse(data);
+
+    await inventoryRepository.registerShrinkage({
+      productId: parsed.productId,
+      lotNumber: parsed.lotNumber,
+      quantity: parsed.quantity,
+      phase: parsed.phase,
+      reasonId: parsed.reasonId,
+      isRecyclable: parsed.isRecyclable,
+      managerId: session.uid,
+    });
+
+    revalidatePath("/inventory");
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+

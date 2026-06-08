@@ -61,3 +61,28 @@ export const productionBatchSchema = z
   });
 
 export type ProductionBatchFormValues = z.infer<typeof productionBatchSchema>;
+
+// ---------------------------------------------------------
+// 3. SCHEMA PARA MERMAS DE PLANTA
+// ---------------------------------------------------------
+export const shrinkageSchema = z
+  .object({
+    productId: z.string().min(1, "Debe seleccionar un producto"),
+    lotNumber: z.string().optional(),
+    quantity: z.coerce.number().min(1, "La cantidad debe ser mayor a 0"),
+    phase: z.enum(["FILLED", "EMPTY"]),
+    reasonId: z.string().min(1, "Debe seleccionar un motivo"),
+    isRecyclable: z.boolean().default(false),
+    notes: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.phase === "FILLED" && (!data.lotNumber || data.lotNumber === "")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El lote es obligatorio para mermas de producto lleno",
+        path: ["lotNumber"],
+      });
+    }
+  });
+
+export type ShrinkageFormValues = z.infer<typeof shrinkageSchema>;

@@ -248,47 +248,142 @@ export const inventoryRepository = {
       if (!productDoc.exists) throw new Error("Producto no encontrado");
       const data = productDoc.data() as Product;
 
-      const currentStock =
-        shrinkage.phase === "EMPTY" ? data.stockEmpty : data.stockFilled;
-      if (currentStock < shrinkage.quantity) {
-        throw new Error(
-          `Stock insuficiente para declarar merma. Disponible: ${currentStock}`,
+      if (shrinkage.phase === "EMPTY") {
+        const currentEmpty = data.stockEmpty || 0;
+        if (currentEmpty < shrinkage.quantity) {
+          throw new Error(`Stock insuficiente para declarar merma de vacíos. Disponible: ${currentEmpty}`);
+        }
+
+        // 1. Actualizar Stock Vacío
+        const newEmpty = currentEmpty - shrinkage.quantity;
+        transaction.update(productRef, {
+          stockEmpty: newEmpty,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // 2. Guardar la Merma
+        const shrinkageRef = adminDb.collection(SHRINKAGE_COLLECTION).doc();
+        transaction.set(shrinkageRef, {
+          ...shrinkage,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // 3. Registrar Kardex OUT/EMPTY
+        const kardexRef = adminDb.collection(KARDEX_COLLECTION).doc();
+        transaction.set(kardexRef, {
+          productId: shrinkage.productId,
+          type: "OUT",
+          phase: "EMPTY",
+          quantity: shrinkage.quantity,
+          referenceId: shrinkageRef.id,
+          referenceType: "SHRINKAGE",
+          previousStock: currentEmpty,
+          newStock: newEmpty,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          movementType: "LOSS",
+          delta: -shrinkage.quantity,
+          resultingBalance: newEmpty,
+          userId: shrinkage.managerId || "SYSTEM",
+        });
+
+      } else { // phase === "FILLED"
+        if (!shrinkage.lotNumber) throw new Error("Se requiere lote para mermas de producto lleno.");
+        
+        // Obtener el lote
+        const batchQuery = await transaction.get(
+          adminDb
+            .collection(PRODUCTION_COLLECTION)
+            .where("productId", "==", shrinkage.productId)
+            .where("lotNumber", "==", shrinkage.lotNumber)
+            .limit(1)
         );
+
+        if (batchQuery.empty) throw new Error(`Lote ${shrinkage.lotNumber} no encontrado.`);
+        
+        const batchRef = batchQuery.docs[0].ref;
+        const batchData = batchQuery.docs[0].data() as ProductionBatch;
+        
+        const currentBatchStock = batchData.currentStock || 0;
+        if (currentBatchStock < shrinkage.quantity) {
+          throw new Error(`Stock insuficiente en el lote ${shrinkage.lotNumber}. Disponible: ${currentBatchStock}`);
+        }
+
+        const currentFilled = data.stockFilled || 0;
+        if (currentFilled < shrinkage.quantity) {
+          throw new Error(`Stock lleno insuficiente en el producto (alerta de desincronización). Disponible: ${currentFilled}`);
+        }
+
+        // 1. Actualizar Stock Lleno del Producto y del Lote
+        const newFilled = currentFilled - shrinkage.quantity;
+        transaction.update(productRef, {
+          stockFilled: newFilled,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        transaction.update(batchRef, {
+          currentStock: currentBatchStock - shrinkage.quantity,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // 2. Guardar la Merma
+        const shrinkageRef = adminDb.collection(SHRINKAGE_COLLECTION).doc();
+        transaction.set(shrinkageRef, {
+          ...shrinkage,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // 3. Registrar Kardex OUT/FILLED (Delta Real)
+        const kardexOutRef = adminDb.collection(KARDEX_COLLECTION).doc();
+        transaction.set(kardexOutRef, {
+          productId: shrinkage.productId,
+          type: "OUT",
+          phase: "FILLED",
+          quantity: shrinkage.quantity,
+          lotNumber: shrinkage.lotNumber,
+          referenceId: shrinkageRef.id,
+          referenceType: "SHRINKAGE",
+          previousStock: currentFilled,
+          newStock: newFilled,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          movementType: "LOSS",
+          delta: -shrinkage.quantity,
+          resultingBalance: newFilled,
+          userId: shrinkage.managerId || "SYSTEM",
+        });
+
+        // 4. Si es reciclable, registrar Kardex IN/EMPTY y actualizar stockEmpty
+        if (shrinkage.isRecyclable) {
+          const currentEmpty = data.stockEmpty || 0;
+          const newEmpty = currentEmpty + shrinkage.quantity;
+          
+          transaction.update(productRef, {
+            stockEmpty: newEmpty
+          });
+
+          const kardexInRef = adminDb.collection(KARDEX_COLLECTION).doc();
+          transaction.set(kardexInRef, {
+            productId: shrinkage.productId,
+            type: "IN",
+            phase: "EMPTY",
+            quantity: shrinkage.quantity,
+            referenceId: shrinkageRef.id,
+            referenceType: "SHRINKAGE",
+            previousStock: currentEmpty,
+            newStock: newEmpty,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            movementType: "RETURN",
+            delta: shrinkage.quantity,
+            resultingBalance: newEmpty,
+            userId: shrinkage.managerId || "SYSTEM",
+          });
+        }
       }
-
-      // 1. Guardar la Merma
-      const shrinkageRef = adminDb.collection(SHRINKAGE_COLLECTION).doc();
-      transaction.set(shrinkageRef, {
-        ...shrinkage,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      // 2. Actualizar Stock
-      const newStock = currentStock - shrinkage.quantity;
-      transaction.update(productRef, {
-        [shrinkage.phase === "EMPTY" ? "stockEmpty" : "stockFilled"]: newStock,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      // 3. Registrar en el Kardex
-      const kardexRef = adminDb.collection(KARDEX_COLLECTION).doc();
-      transaction.set(kardexRef, {
-        productId: shrinkage.productId,
-        type: "OUT",
-        phase: shrinkage.phase,
-        quantity: shrinkage.quantity,
-        referenceId: shrinkageRef.id,
-        referenceType: "SHRINKAGE",
-        previousStock: currentStock,
-        newStock: newStock,
-        createdAt: new Date(),
-        movementType: "LOSS",
-        delta: -shrinkage.quantity,
-        resultingBalance: newStock,
-        userId: shrinkage.managerId || "SYSTEM",
-      });
     });
-    revalidateTag("products", "max");
+    try {
+      revalidateTag("products", "max");
+    } catch (error) {
+      // Ignorar si se ejecuta fuera de un contexto de servidor Next.js (como scripts de terminal)
+    }
   },
 
   // ----------------------------------------------------------------
