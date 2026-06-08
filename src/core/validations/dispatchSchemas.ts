@@ -45,6 +45,7 @@ export const liquidationEmptyReturnSchema = z.object({
 
 // El formulario completo de liquidación
 export const liquidationManifestSchema = z.object({
+  liquidationDate: z.string().min(1, "Debe seleccionar la fecha de cierre"),
   items: z.array(liquidationItemSchema),
   returnedEmpties: z.array(liquidationEmptyReturnSchema),
   // Hacemos el cuadre de efectivo opcional (default 0)

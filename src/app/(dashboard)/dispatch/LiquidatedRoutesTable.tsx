@@ -13,20 +13,19 @@ import {
   Eye,
   Calendar,
   ReceiptText,
-  AlertCircle,
-  X,
-  Package,
-  ArrowDownToLine,
-  Users,
-  Loader2,
+  Clock,
+  ArrowRight,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { formatPeruDateTime } from "@/core/utils/dateUtils";
 
 interface LiquidatedRoutesTableProps {
   liquidatedRoutes: any[];
-  users: any[];
-  products: any[];
+  users?: any[];
+  products?: any[];
   nextCursor: string | null;
   hasMore: boolean;
   totalCount: number;
@@ -54,38 +53,18 @@ export function LiquidatedRoutesTable({
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
 
-  // --- FILTROS Y ESTADOS ---
+  // --- FILTROS LOCALES ---
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
-  // Filtros Avanzados
-  const [selectedDriverId, setSelectedDriverId] = useState(currentDriverId);
-  const [startDate, setStartDate] = useState(currentStartDate);
-  const [endDate, setEndDate] = useState(currentEndDate);
-
+  // Cerrar filtros al clickear fuera
   useEffect(() => {
-    setSelectedDriverId(currentDriverId);
-  }, [currentDriverId]);
-
-  useEffect(() => {
-    setStartDate(currentStartDate);
-  }, [currentStartDate]);
-
-  useEffect(() => {
-    setEndDate(currentEndDate);
-  }, [currentEndDate]);
-
-  // Cerrar filtros al hacer click afuera
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        filterRef.current &&
-        !filterRef.current.contains(event.target as Node)
-      ) {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(event.target as Node)) {
         setShowFilters(false);
       }
-    }
+    };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
@@ -100,441 +79,336 @@ export function LiquidatedRoutesTable({
     return users?.find((u) => u.id === id)?.name || "Auxiliar Desconocido";
   };
 
-  const formatDateTime = (isoString: string) => {
-    if (!isoString) return "-";
-    return new Date(isoString).toLocaleString("es-PE", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    });
-  };
-
   // --- LÓGICA DE NAVEGACIÓN Y FILTRADO ---
   const cursorArray = currentCursors ? currentCursors.split(",") : [];
   const currentPage = cursorArray.length + 1;
   const totalPages = Math.ceil(totalCount / currentLimit);
 
   const navigate = (params: {
-    driverId?: string;
-    startDate?: string;
-    endDate?: string;
-    cursors?: string;
     limit?: number;
+    cursor?: string;
+    clearCursors?: boolean;
   }) => {
-    const query = new URLSearchParams();
+    const searchParams = new URLSearchParams(window.location.search);
+    if (params.limit) searchParams.set("limit", String(params.limit));
 
-    const newDriverId = params.driverId !== undefined ? params.driverId : currentDriverId;
-    if (newDriverId && newDriverId !== "ALL") {
-      query.set("driverId", newDriverId);
+    if (params.clearCursors) {
+      searchParams.delete("cursor");
+    } else if (params.cursor !== undefined) {
+      searchParams.set("cursor", params.cursor);
     }
-
-    const newStartDate = params.startDate !== undefined ? params.startDate : currentStartDate;
-    if (newStartDate) {
-      query.set("startDate", newStartDate);
-    }
-
-    const newEndDate = params.endDate !== undefined ? params.endDate : currentEndDate;
-    if (newEndDate) {
-      query.set("endDate", newEndDate);
-    }
-
-    const newCursors = params.cursors !== undefined ? params.cursors : currentCursors;
-    if (newCursors) {
-      query.set("cursors", newCursors);
-    }
-
-    const newLimit = params.limit !== undefined ? params.limit : currentLimit;
-    query.set("limit", String(newLimit));
 
     startTransition(() => {
-      router.push(`${pathname}?${query.toString()}`);
-    });
-  };
-
-  const handleNextPage = () => {
-    if (!hasMore || !nextCursor) return;
-    const nextCursors = currentCursors ? `${currentCursors},${nextCursor}` : nextCursor;
-    navigate({ cursors: nextCursors });
-  };
-
-  const handlePrevPage = () => {
-    if (currentPage === 1) return;
-    const prevCursors = cursorArray.slice(0, -1).join(",");
-    navigate({ cursors: prevCursors });
-  };
-
-  const applyAdvancedFilters = (filters: { driverId: string; startDate: string; endDate: string }) => {
-    navigate({
-      driverId: filters.driverId,
-      startDate: filters.startDate,
-      endDate: filters.endDate,
-      cursors: "",
-    });
-  };
-
-  const handleClearFilters = () => {
-    setSelectedDriverId("ALL");
-    setStartDate("");
-    setEndDate("");
-    setShowFilters(false);
-    navigate({
-      driverId: "ALL",
-      startDate: "",
-      endDate: "",
-      cursors: "",
+      router.push(`${pathname}?${searchParams.toString()}`);
     });
   };
 
   const filteredRoutes = useMemo(() => {
     return liquidatedRoutes.filter((r) => {
-      const matchesSearch =
-        r.manifestNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        r.truckPlate?.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesSearch;
+      const searchLower = searchQuery.toLowerCase();
+      return (
+        r.manifestNumber?.toLowerCase().includes(searchLower) ||
+        r.truckPlate?.toLowerCase().includes(searchLower) ||
+        getDriverName(r.driverId).toLowerCase().includes(searchLower)
+      );
     });
   }, [liquidatedRoutes, searchQuery]);
 
-  const paginatedData = filteredRoutes;
-
-  const activeFiltersCount =
-    (selectedDriverId !== "ALL" ? 1 : 0) +
-    (startDate ? 1 : 0) +
-    (endDate ? 1 : 0);
-
   return (
-    <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm flex flex-col relative min-h-[500px]">
-      {isPending && (
-        <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-10 flex items-center justify-center rounded-[2rem]">
-          <Loader2 className="h-8 w-8 text-orange-500 animate-spin" />
-        </div>
-      )}
-      {/* TOOLBAR AL ESTILO CRM CLIENTES */}
-      <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between gap-4 items-center">
-        <div className="relative w-full sm:max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Buscar por # manifiesto o placa de camión..."
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-            }}
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-medium text-slate-800"
-          />
+    <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
+      {/* HEADER DE LA TABLA */}
+      <div className="px-8 py-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50/50">
+        <div>
+          <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+            <ReceiptText className="h-6 w-6 text-blue-500" />
+            Historial de Liquidaciones
+          </h2>
+          <p className="text-sm text-slate-500 font-medium">
+            Mostrando {filteredRoutes.length} de {totalCount} rutas cerradas
+          </p>
         </div>
 
-        <div className="relative" ref={filterRef}>
-          <Button
-            variant="outline"
-            onClick={() => setShowFilters(!showFilters)}
-            className={`font-bold rounded-xl flex items-center gap-2 px-5 py-2.5 h-auto ${activeFiltersCount > 0 ? "border-orange-200 bg-orange-50 text-orange-700" : "text-slate-600"}`}
-          >
-            <Filter className="h-4 w-4" /> Filtros Avanzados
-            {activeFiltersCount > 0 && (
-              <span className="h-4 w-4 rounded-full bg-orange-500 text-white text-[10px] flex items-center justify-center ml-1 font-black">
-                {activeFiltersCount}
-              </span>
-            )}
-          </Button>
-
-          {showFilters && (
-            <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 z-20 space-y-4 animate-in fade-in slide-in-from-top-2">
-              {/* FILTRO POR CHOFER */}
-              <div className="space-y-1.5">
-                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                  <Users className="h-3 w-3" /> Chofer Responsable
-                </div>
-                <select
-                  value={selectedDriverId}
-                  onChange={(e) => {
-                    setSelectedDriverId(e.target.value);
-                    applyAdvancedFilters({ driverId: e.target.value, startDate, endDate });
-                  }}
-                  className="w-full h-10 px-2 rounded-xl border border-slate-200 bg-slate-50 font-bold text-xs text-slate-700 focus:outline-none"
-                >
-                  <option value="ALL">Todos los Choferes</option>
-                  {users
-                    .filter((u) => u.roles?.includes("DRIVER") || u.roles?.includes("ADMIN"))
-                    .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              {/* FILTRO POR RANGO DE FECHAS */}
-              <div className="space-y-1.5">
-                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                  <Calendar className="h-3 w-3" /> Rango de Fecha (Salida)
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-bold text-slate-400 uppercase">
-                      Desde
-                    </label>
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => {
-                        setStartDate(e.target.value);
-                        applyAdvancedFilters({ driverId: selectedDriverId, startDate: e.target.value, endDate });
-                      }}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-bold text-slate-400 uppercase">
-                      Hasta
-                    </label>
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => {
-                        setEndDate(e.target.value);
-                        applyAdvancedFilters({ driverId: selectedDriverId, startDate, endDate: e.target.value });
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full text-xs font-black text-slate-400 hover:text-orange-600 mt-2 border-t pt-2 rounded-none"
-                onClick={() => {
-                  setSelectedDriverId("ALL");
-                  setStartDate("");
-                  setEndDate("");
-                }}
-              >
-                Limpiar Parámetros de Búsqueda
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* RENDERIZADO DE TABLA ESTILO CRM */}
-      <div className="flex-1 overflow-x-auto">
-        {paginatedData.length === 0 ? (
-          <div className="p-16 text-center">
-            <ReceiptText className="h-16 w-16 text-slate-200 mx-auto mb-4" />
-            <h3 className="text-xl font-black text-slate-800">
-              Sin liquidaciones
-            </h3>
-            <p className="text-slate-500 font-medium mt-2">
-              No se encontraron registros históricos con los criterios actuales.
-            </p>
+        <div className="flex items-center gap-2">
+          <div className="relative group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+            <Input
+              placeholder="Buscar por placa, chofer o #..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 h-11 w-full md:w-[280px] bg-white border-slate-200 rounded-2xl text-sm focus:ring-4 focus:ring-blue-50 transition-all"
+            />
           </div>
-        ) : (
-          <table className="w-full text-sm text-left">
-            <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200">
-              <tr>
-                <th className="px-6 py-4 w-16 text-center">#</th>
-                <th className="px-6 py-4">Manifiesto e Información</th>
-                <th className="px-6 py-4">Chofer / Auxiliar</th>
-                <th className="px-6 py-4">
-                  Horario de Ruta (Salida y Regreso)
-                </th>
-                <th className="px-6 py-4 text-center">Carga Retornada</th>
-                <th className="px-6 py-4 text-right">Efectivo Rendido</th>
-                <th className="px-6 py-4 text-center">Estado Auditoría</th>
-                <th className="px-6 py-4 text-center">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {paginatedData.map((dispatch, index) => {
-                const globalIndex =
-                  (currentPage - 1) * currentLimit + index + 1;
 
-                // Cálculo rápido de mermas o devoluciones físicas para el Tooltip nativo
-                const totalReturnedFulls =
-                  dispatch.items?.reduce(
-                    (sum: number, i: any) =>
-                      sum + (i.quantityReturnedFull || 0),
-                    0,
-                  ) || 0;
-                const totalWastes =
-                  dispatch.items?.reduce(
-                    (sum: number, i: any) => sum + (i.wasteQuantity || 0),
-                    0,
-                  ) || 0;
+          <div className="relative" ref={filterRef}>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setShowFilters(!showFilters)}
+              className={`h-11 w-11 rounded-2xl transition-all ${
+                showFilters
+                  ? "bg-blue-50 border-blue-200 text-blue-600 ring-4 ring-blue-50"
+                  : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              <Filter className="h-5 w-5" />
+            </Button>
 
-                return (
-                  <tr
-                    key={dispatch.id}
-                    className="transition-colors hover:bg-slate-50/50 group"
-                  >
-                    <td className="px-6 py-4 text-center font-black text-slate-300">
-                      {globalIndex}
-                    </td>
-
-                    <td className="px-6 py-4">
-                      <div className="font-black text-slate-900 uppercase text-sm">
-                        {dispatch.manifestNumber || "S/N"}
-                      </div>
-                      <div className="text-[10px] font-black text-orange-600 tracking-wider uppercase mt-0.5 flex items-center gap-1">
-                        <Truck className="h-3 w-3 text-slate-400" /> Placa:{" "}
-                        {dispatch.truckPlate}
-                      </div>
-                    </td>
-
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center shrink-0 font-black text-xs uppercase">
-                          {getDriverName(dispatch.driverId).substring(0, 2)}
-                        </div>
-                        <div>
-                          <p className="font-black text-slate-800 text-xs capitalize leading-tight">
-                            {getDriverName(dispatch.driverId)}
-                          </p>
-                          <p className="text-[9px] font-bold text-slate-400 mt-0.5 uppercase tracking-wide">
-                            Aux: {getAssistantName(dispatch.assistantId)}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="px-6 py-4 text-xs font-medium text-slate-600 space-y-1">
-                      <p className="flex items-center gap-1 text-slate-800 font-bold">
-                        <span className="text-[9px] font-black bg-blue-50 text-blue-600 px-1 rounded uppercase">
-                          Sal
-                        </span>
-                        {formatDateTime(dispatch.dispatchDate)}
-                      </p>
-                      <p className="flex items-center gap-1 text-slate-500">
-                        <span className="text-[9px] font-black bg-emerald-50 text-emerald-600 px-1 rounded uppercase">
-                          Liq
-                        </span>
-                        {formatDateTime(dispatch.liquidatedAt || dispatch.liquidationDate)}
-                      </p>
-                    </td>
-
-                    {/* HOVER TOOLTIP INTERACTIVO CON DISEÑO PURO */}
-                    <td className="px-6 py-4 text-center">
-                      <div className="relative group/tooltip inline-block">
-                        <span className="cursor-help bg-slate-50 text-slate-700 px-2.5 py-1 rounded-md text-xs font-black border border-slate-200 flex items-center gap-1 mx-auto w-max">
-                          <Package className="h-3.5 w-3.5 text-slate-400" /> F:{" "}
-                          {totalReturnedFulls} | M: {totalWastes}
-                        </span>
-
-                        {/* Dropdown de desglose flotante al hacer hover */}
-                        <div className="absolute hidden group-hover/tooltip:block z-30 bottom-full left-1/2 -translate-x-1/2 mb-2 bg-slate-900 text-white p-3 rounded-xl text-xs w-60 shadow-2xl border border-slate-800 text-left animate-in fade-in slide-in-from-bottom-1 duration-150">
-                          <p className="font-black text-[10px] uppercase tracking-widest text-slate-400 border-b border-slate-800 pb-1.5 mb-1.5">
-                            Rendición de Carga Física
-                          </p>
-                          <div className="space-y-1 max-h-32 overflow-y-auto">
-                            {dispatch.items?.map((item: any, idx: number) => {
-                              const name =
-                                products.find((p) => p.id === item.productId)
-                                  ?.name || "Producto";
-                              if (
-                                (item.quantityReturnedFull || 0) === 0 &&
-                                (item.wasteQuantity || 0) === 0
-                              )
-                                return null;
-                              return (
-                                <div
-                                  key={idx}
-                                  className="flex justify-between items-center gap-2 font-medium border-b border-slate-800/40 pb-1"
-                                >
-                                  <span className="text-slate-300 truncate capitalize text-[11px]">
-                                    {name}
-                                  </span>
-                                  <span className="font-mono text-[11px] shrink-0 text-orange-400 font-bold">
-                                    {item.quantityReturnedFull || 0}L /{" "}
-                                    {item.wasteQuantity || 0}M
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="px-6 py-4 text-right">
-                      <div className="text-base font-black text-slate-900">
-                        S/{" "}
-                        {(
-                          dispatch.realCashReceived ||
-                          dispatch.cashReported ||
-                          0
-                        ).toFixed(2)}
-                      </div>
-                    </td>
-
-                    <td className="px-6 py-4 text-center">
-                      <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider flex items-center gap-1 w-max mx-auto">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />{" "}
-                        Cuadrado
-                      </span>
-                    </td>
-
-                    <td className="px-6 py-4 text-center">
-                      <Button
-                        asChild
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 hover:bg-slate-100 rounded-full"
-                      >
-                        <Link href={`/dispatch/${dispatch.id}`}>
-                          <Eye className="h-4 w-4 text-blue-500" />
-                        </Link>
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+            {showFilters && (
+              <div className="absolute right-0 mt-2 w-64 bg-white rounded-3xl border border-slate-200 shadow-2xl z-50 p-4 animate-in fade-in zoom-in duration-200">
+                <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 px-2">
+                  Filtrar por
+                </p>
+                <div className="space-y-1">
+                  <button className="w-full text-left px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors flex items-center justify-between">
+                    Estado: Todos
+                    <div className="h-2 w-2 rounded-full bg-slate-300" />
+                  </button>
+                  <button className="w-full text-left px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">
+                    Fecha: Últimos 30 días
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* FOOTER GENERAL DE LA TABLA */}
-      <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex flex-col md:flex-row items-center justify-between gap-4 mt-auto rounded-b-[2rem]">
-        <div className="flex items-center gap-2 text-sm text-slate-500 font-medium">
-          <span>Mostrar</span>
-          <select
-            value={currentLimit}
-            onChange={(e) => {
-              navigate({ limit: Number(e.target.value), cursors: "" });
-            }}
-            className="border border-slate-200 bg-white rounded-md px-2 py-1 font-bold text-slate-700 focus:outline-none shadow-sm text-xs"
-          >
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-          </select>
-          <span>registros por página</span>
-        </div>
+      {/* CUERPO DE LA TABLA */}
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-slate-100 bg-white">
+              <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                Manifiesto
+              </th>
+              <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                Vehículo y Personal
+              </th>
+              <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                Tiempos
+              </th>
+              <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                Rendimiento
+              </th>
+              <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                Caja Declarada
+              </th>
+              <th className="px-6 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                Acciones
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {filteredRoutes.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-6 py-20 text-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="h-16 w-16 bg-slate-50 rounded-full flex items-center justify-center">
+                      <Search className="h-8 w-8 text-slate-200" />
+                    </div>
+                    <p className="text-slate-400 font-bold">
+                      Sin liquidaciones
+                    </p>
+                    <p className="text-xs text-slate-300">
+                      No se encontraron resultados para tu búsqueda
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              filteredRoutes.map((dispatch) => (
+                <tr
+                  key={dispatch.id}
+                  className="hover:bg-slate-50/50 transition-colors group"
+                >
+                  <td className="px-6 py-4">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-black text-slate-800">
+                        {dispatch.manifestNumber}
+                      </span>
+                      <Badge className="w-fit mt-1 bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-50 font-bold text-[10px] px-2 py-0">
+                        LIQUIDADO
+                      </Badge>
+                    </div>
+                  </td>
+
+                  <td className="px-6 py-4">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <div className="h-7 w-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500">
+                          <Truck className="h-4 w-4" />
+                        </div>
+                        <span className="text-xs font-black text-slate-700 bg-slate-100 px-2 py-0.5 rounded uppercase">
+                          {dispatch.truckPlate}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="h-7 w-7 rounded-lg bg-blue-50 flex items-center justify-center text-blue-500">
+                          <User className="h-4 w-4" />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[11px] font-bold text-slate-800 leading-none">
+                            {getDriverName(dispatch.driverId)}
+                          </span>
+                          <span className="text-[9px] font-medium text-slate-400">
+                            {getAssistantName(dispatch.assistantId)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+
+                  <td className="px-6 py-4 text-xs font-medium text-slate-600 space-y-1">
+                    <p className="flex items-center gap-1 text-slate-800 font-bold">
+                      <span className="text-[9px] font-black bg-blue-50 text-blue-600 px-1 rounded uppercase">
+                        Sal
+                      </span>
+                      {formatPeruDateTime(dispatch.dispatchDate)}
+                    </p>
+                    <p className="flex items-center gap-1 text-slate-500">
+                      <span className="text-[9px] font-black bg-emerald-50 text-emerald-600 px-1 rounded uppercase">
+                        Liq
+                      </span>
+                      {formatPeruDateTime(dispatch.liquidatedAt || dispatch.liquidationDate)}
+                    </p>
+                  </td>
+
+                  {/* HOVER TOOLTIP INTERACTIVO CON DISEÑO PURO */}
+                  <td className="px-6 py-4 text-center">
+                    <div className="relative group/tooltip inline-block cursor-help">
+                      <div className="flex items-center justify-center gap-3">
+                        <div className="flex items-center justify-center">
+                          <div className="flex flex-col items-center">
+                            <span className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">
+                              Venta
+                            </span>
+                            <span className="text-xs font-black text-emerald-600">
+                              {dispatch.items?.reduce(
+                                (s: number, i: any) => s + (i.quantitySold || 0),
+                                0,
+                              ) || 0}
+                            </span>
+                          </div>
+                          <div className="h-6 w-px bg-slate-100 mx-3" />
+                          <div className="flex flex-col items-center">
+                            <span className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">
+                              Merma
+                            </span>
+                            <span className="text-xs font-black text-red-500">
+                              {dispatch.items?.reduce(
+                                (s: number, i: any) => s + (i.wasteQuantity || 0),
+                                0,
+                              ) || 0}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Tooltip con Glassmorphism */}
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-48 hidden group-hover/tooltip:block z-50">
+                        <div className="bg-slate-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-white/10 animate-in slide-in-from-bottom-2">
+                          <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-2">
+                            Detalle Carga
+                          </p>
+                          <div className="space-y-1 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-white/60">Cargado:</span>
+                              <span className="font-bold">
+                                {dispatch.items?.reduce(
+                                  (s: number, i: any) =>
+                                    s + (i.quantityLoaded || 0),
+                                  0,
+                                ) || 0}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-white/60">Retorno:</span>
+                              <span className="font-bold text-blue-400">
+                                {dispatch.items?.reduce(
+                                  (s: number, i: any) =>
+                                    s + (i.quantityReturnedFull || 0),
+                                  0,
+                                ) || 0}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="w-3 h-3 bg-slate-900/95 rotate-45 absolute -bottom-1.5 left-1/2 -translate-x-1/2 border-r border-b border-white/10" />
+                      </div>
+                    </div>
+                  </td>
+
+                  <td className="px-6 py-4 text-center">
+                    <div className="inline-flex flex-col items-center">
+                      <div className="flex items-center gap-1 text-xs font-black text-slate-800">
+                        S/ {dispatch.cashReported?.toFixed(2) || "0.00"}
+                      </div>
+                      <div className="flex items-center gap-1 text-[9px] font-bold text-blue-500">
+                        <Badge
+                          variant="outline"
+                          className="px-1 py-0 border-blue-100 text-blue-500 text-[8px] bg-blue-50/50"
+                        >
+                          Digital: S/{" "}
+                          {dispatch.digitalPaymentsReported?.toFixed(2) ||
+                            "0.00"}
+                        </Badge>
+                      </div>
+                    </div>
+                  </td>
+
+                  <td className="px-6 py-4 text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        router.push(`/dispatch/${dispatch.id}`)
+                      }
+                      className="h-9 w-9 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all"
+                    >
+                      <ArrowRight className="h-5 w-5" />
+                    </Button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* PAGINACIÓN ESTILO MODERN */}
+      <div className="px-8 py-6 border-t border-slate-100 bg-white flex flex-col sm:flex-row items-center justify-between gap-4">
+        <p className="text-xs font-bold text-slate-400">
+          Página {currentPage} de {totalPages}
+        </p>
 
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            size="sm"
-            onClick={handlePrevPage}
-            disabled={currentPage === 1}
-            className="h-8 w-8 p-0 bg-white shadow-sm rounded-lg"
+            disabled={currentPage === 1 || isPending}
+            onClick={() => {
+              const newCursors = cursorArray.slice(0, -1).join(",");
+              navigate({ cursor: newCursors });
+            }}
+            className="h-10 px-4 rounded-xl text-xs font-bold border-slate-200"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Anterior
           </Button>
-          <div className="flex items-center px-4 h-8 text-xs font-black text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm">
-            Página {currentPage} de {totalPages || 1}
-          </div>
+
           <Button
             variant="outline"
-            size="sm"
-            onClick={handleNextPage}
-            disabled={!hasMore}
-            className="h-8 w-8 p-0 bg-white shadow-sm rounded-lg"
+            disabled={currentPage === totalPages || isPending}
+            onClick={() => {
+              const lastItem = filteredRoutes[filteredRoutes.length - 1];
+              const newCursors = currentCursors
+                ? `${currentCursors},${lastItem.id}`
+                : lastItem.id;
+              navigate({ cursor: newCursors });
+            }}
+            className="h-10 px-4 rounded-xl text-xs font-bold border-slate-200"
           >
-            <ChevronRight className="h-4 w-4" />
+            Siguiente
+            <ChevronRight className="h-4 w-4 ml-2" />
           </Button>
         </div>
       </div>
