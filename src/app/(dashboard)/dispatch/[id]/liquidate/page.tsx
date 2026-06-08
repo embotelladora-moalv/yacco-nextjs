@@ -39,12 +39,9 @@ export default async function LiquidatePage({
     .get();
 
   // SOLUCIÓN DEFINITIVA: Usamos el serializador recursivo para limpiar todos los Timestamps (date, dateProcess, etc)
-  const sales = salesSnapshot.docs.map((doc) => {
-    return serializeFirestoreData({
-      id: doc.id,
-      ...doc.data(),
-    });
-  });
+  const sales = salesSnapshot.docs
+    .map((doc) => serializeFirestoreData({ id: doc.id, ...doc.data() }))
+    .filter((sale: any) => sale.status === "COMPLETED"); // Filtrar en memoria para no requerir índice compuesto
 
   // 4. Obtener Gastos (Opcional, para el cuadre de caja futuro)
   const expenses = await financeRepository.getMovementsByManifest(

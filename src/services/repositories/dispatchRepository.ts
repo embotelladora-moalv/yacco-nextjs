@@ -286,6 +286,23 @@ export const dispatchRepository = {
       // 🚀 FASE 1: RECOPILACIÓN Y LECTURA DE DATOS ANTES DE LAS ESCRITURAS
       // =========================================================================
 
+      // Obtenemos las ventas COMPLETED del manifiesto para el cuadre estricto
+      const salesSnapshot = await adminDb
+        .collection("sales")
+        .where("manifestId", "==", manifestId)
+        .get();
+
+      const salesMap: Record<string, number> = {};
+      salesSnapshot.docs.forEach((doc) => {
+        const sale = doc.data();
+        if (sale.status === "COMPLETED") {
+          (sale.items || []).forEach((item: any) => {
+            const key = `${item.productId}_${item.lotNumber}`;
+            salesMap[key] = (salesMap[key] || 0) + item.quantity;
+          });
+        }
+      });
+
       // Obtenemos todos los productIds únicos involucrados en mermas, llenos y envases vacíos
       const uniqueProductIds = Array.from(
         new Set([
@@ -352,16 +369,17 @@ export const dispatchRepository = {
         if (manifestItemIndex === -1) continue;
 
         const totalWaste = reportedItem.waste.reduce((sum, w) => sum + w.quantity, 0);
-        const quantitySold =
-          reportedItem.quantityLoaded -
-          reportedItem.quantityReturnedFull -
-          totalWaste;
+        const realSold = salesMap[`${reportedItem.productId}_${reportedItem.lotNumber}`] || 0;
+        
+        const unreconciled = Math.max(0, reportedItem.quantityLoaded - realSold - reportedItem.quantityReturnedFull - totalWaste);
+        const quantitySold = reportedItem.quantityLoaded - reportedItem.quantityReturnedFull - totalWaste - unreconciled;
 
         updatedItems[manifestItemIndex] = {
           ...updatedItems[manifestItemIndex],
           quantityReturnedFull: reportedItem.quantityReturnedFull,
           wasteQuantity: totalWaste, // Mantenemos el total para compatibilidad visual
           waste: reportedItem.waste, // Nueva estructura detallada
+          unreconciledLoss: unreconciled,
           quantitySold: quantitySold,
         };
 
@@ -436,10 +454,10 @@ export const dispatchRepository = {
               referenceId: manifestId,
               reasonId: w.reasonId,
               previousStock: currentFilledWithReturns,
-              newStock: currentFilledWithReturns, // Se mantiene igual
+              newStock: currentFilledWithReturns, // Traza informativa (Alternativa A)
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
               movementType: "SHRINKAGE",
-              delta: -w.quantity,
+              delta: 0, // NO mueve el saldo físico
               resultingBalance: currentFilledWithReturns,
               userId: userId || manifestData?.dispatcherId || manifestData?.driverId || "SYSTEM",
             },
@@ -473,6 +491,32 @@ export const dispatchRepository = {
               },
             });
           }
+        }
+
+        // C. PROCESAR FALTANTE INEXPLICABLE
+        if (unreconciled > 0) {
+          const currentFilled = productDocsMap[reportedItem.productId]?.stockFilled || 0;
+          const currentFilledWithReturns = currentFilled + productStockUpdates[reportedItem.productId].filledDelta;
+
+          kardexEntries.push({
+            ref: adminDb.collection(KARDEX_COLLECTION).doc(),
+            data: {
+              productId: reportedItem.productId,
+              type: "OUT",
+              phase: "FILLED",
+              quantity: unreconciled,
+              lotNumber: reportedItem.lotNumber,
+              referenceType: "UNRECONCILED_LOSS",
+              referenceId: manifestId,
+              previousStock: currentFilledWithReturns,
+              newStock: currentFilledWithReturns, // Traza informativa (Alternativa A)
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              movementType: "LOSS",
+              delta: 0, // NO mueve el saldo físico
+              resultingBalance: currentFilledWithReturns,
+              userId: userId || manifestData?.dispatcherId || manifestData?.driverId || "SYSTEM",
+            },
+          });
         }
       }
 

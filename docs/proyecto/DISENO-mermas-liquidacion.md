@@ -133,12 +133,52 @@ build+test verde, push de Giancarlo. NO stackear.
 - **NO incluye cuadre forzado todavía** (eso es Fase 2). Acá solo se traza
   la merma correctamente.
 
-### Fase 2 — Cuadre forzado (eliminar el limbo)
-- El retorno deja de ser libremente editable, o se valida contra ventas reales.
-- Regla: `vendido(real) + vuelto + merma = cargado`, exacto.
-- Toda diferencia no-vuelta es merma obligatoria con motivo.
-- Requiere cruzar ventas registradas del manifest vs cuadre físico.
-- La más delicada: toca la lógica central del cierre.
+### Fase 2 — Cuadre visible (iluminar el limbo, NO bloquear)
+
+> Reformulada tras grill. NO es bloqueo rígido — decisión de Giancarlo:
+> el encargado debe poder cerrar aunque no cuadre (error de carga, conteo
+> apurado, etc.), pero el descuadre deja de ser invisible.
+
+**Fuente del "vendido real":** las ventas registradas en ruta (colección
+`sales`), cruzadas por `productId + lotNumber`. El vendido NO lo tipea el
+liquidador — sale de las boletas (ya generaron deuda/cobro/SUNAT).
+
+**Granularidad:** por `productId + lotNumber`. Las ventas guardan `lotNumber`
+(confirmado). CORRIGE un bug existente: la sugerencia actual agrupa ventas
+solo por producto e ignora el lote, repartiendo mal el vendido entre lotes.
+Clave del agrupador debe ser `${productId}_${lotNumber}`.
+
+**Mecánica (modelo A — retorno editable + descuadre en vivo):**
+- El retorno se precarga con el sugerido (`cargado − vendido_real` por lote)
+  pero sigue **editable** (el encargado cuenta físicamente).
+- En vivo: `faltante(lote) = cargado − vendido_real − vuelto − suma(merma)`.
+- Panel de descuadre por lote: muestra cuánto falta justificar.
+- El encargado puede: clasificar el faltante como merma con motivo (Fase 1),
+  corregir el vuelto, o **dejarlo como faltante sin justificar**.
+
+**Faltante sin justificar (NO se bloquea el cierre):**
+- Se permite cerrar con faltante.
+- PERO el faltante queda **trazado**: se registra explícitamente (campo en el
+  manifest) + asiento de Kardex `OUT/FILLED` con
+  `referenceType: "UNRECONCILED_LOSS"` (distinto de `SHRINKAGE`).
+- Igual que la merma: es traza de evento, el stock ya salió en el despacho,
+  NO re-resta `stockFilled`/lote. Solo deja registro auditable.
+- Diferencia con hoy: hoy el faltante DESAPARECE sin rastro. Con Fase 2 queda
+  registrado y auditable (cuánto se perdió sin justificar por ruta).
+
+**Tres destinos de lo no-vuelto (todos trazados):**
+- Vendido → ya en `sales` (deuda/cobro/SUNAT).
+- Merma con motivo → `SHRINKAGE`, reciclable o no (Fase 1).
+- Faltante sin justificar → `UNRECONCILED_LOSS` (Fase 2).
+
+**Query de ventas:** traer por `manifestId` (filtro simple, sin índice nuevo)
+y filtrar `status == COMPLETED` en memoria (pocas ventas por manifest). NO
+usar where compuesto manifestId+status (pediría índice nuevo).
+
+**Error de carga (11 vs 10):** NO se resuelve en Fase 2. Aparecerá como un
+faltante trazado (honesto). Su corrección de fondo (ajustar stock de planta)
+es Fase 3. El cuadre visible NO bloquea, así que el error de carga no traba
+el cierre.
 
 ### Fase 3 (futura, fuera de este ciclo)
 - Corrección de carga / ajuste de stock de planta (válvula 1).

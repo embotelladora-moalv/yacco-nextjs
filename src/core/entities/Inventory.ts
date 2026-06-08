@@ -77,6 +77,7 @@ export interface KardexLog {
   referenceType:
     | "PRODUCTION"
     | "SHRINKAGE"
+    | "UNRECONCILED_LOSS"
     | "SALE"
     | "RETURN"
     | "PURCHASE"
