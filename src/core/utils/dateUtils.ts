@@ -54,3 +54,18 @@ export function formatPeruDateTime(date: Date | string | null | undefined): stri
   });
 }
 
+/**
+ * Genera un slug estable a partir de un nombre.
+ * Útil para IDs de motivos de merma.
+ */
+export function slugifyReason(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Quitar tildes
+    .replace(/[^a-z0-9]+/g, "-") // No alfanuméricos -> guion
+    .replace(/^-+|-+$/g, ""); // Quitar guiones de bordes
+}
+
+
