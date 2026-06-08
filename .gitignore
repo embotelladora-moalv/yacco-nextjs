@@ -65,3 +65,4 @@ firestore-debug.log*
 firebase-data/
 /scripts/cleanup/backup-*/
 /scripts/verify/*.txt
+/scripts/verify/
