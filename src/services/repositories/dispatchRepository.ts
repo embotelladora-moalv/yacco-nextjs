@@ -247,6 +247,7 @@ export const dispatchRepository = {
   async liquidateDispatch(
     manifestId: string,
     liquidationData: {
+      liquidationDate: Date;
       items: {
         productId: string;
         lotNumber: string;
@@ -269,6 +270,11 @@ export const dispatchRepository = {
 
       if (!manifestDoc.exists) throw new Error("Manifiesto no encontrado");
       const manifestData = manifestDoc.data();
+      
+      if (manifestData?.status === "LIQUIDATED") {
+        throw new Error("Este despacho ya fue liquidado");
+      }
+      
       if (manifestData?.status !== "ON_ROUTE")
         throw new Error("El manifiesto no está en ruta");
 
@@ -474,7 +480,7 @@ export const dispatchRepository = {
         notes: liquidationData.notes
           ? `${manifestData?.notes || ""} | Liq: ${liquidationData.notes}`
           : manifestData?.notes,
-        liquidationDate: admin.firestore.FieldValue.serverTimestamp(),
+        liquidationDate: admin.firestore.Timestamp.fromDate(liquidationData.liquidationDate),
         liquidatedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });

@@ -16,6 +16,8 @@ import {
 } from "@/core/use-cases/collections/paymentAllocation";
 import { serializeFirestoreData } from "@/services/firebase/serialization";
 import { paginate, PaginatedResult } from "./_pagination";
+import { getPeruNow } from "@/core/utils/dateUtils";
+import { getPeruMonthStartUtc } from "@/core/utils/serverDateUtils";
 
 const SALES_COLLECTION = "sales";
 const CUSTOMERS_COLLECTION = "customers";
@@ -23,16 +25,6 @@ const DISPATCH_COLLECTION = "dispatchManifests";
 const PRODUCTS_COLLECTION = "products";
 const PRODUCTION_COLLECTION = "productionBatches";
 const CUSTOMER_CONTAINER_LOGS_COLLECTION = "customerContainerLogs";
-
-const OFFSET_PERU_MS = 5 * 60 * 60 * 1000;
-
-function getPeruNow() {
-  return new Date(Date.now() - OFFSET_PERU_MS);
-}
-
-function getPeruMonthStartUtc(year: number, monthIndex: number) {
-  return admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, monthIndex, 1, 5, 0, 0, 0)));
-}
 
 export const salesRepository = {
   /**

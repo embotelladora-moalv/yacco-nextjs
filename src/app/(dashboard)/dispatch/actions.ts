@@ -11,6 +11,7 @@ import {
 } from "@/core/validations/dispatchSchemas";
 import { revalidatePath } from "next/cache";
 import { getUserSession } from "@/services/firebase/auth";
+import { parsePeruDatetimeLocal } from "@/core/utils/dateUtils";
 
 // =========================================================================
 // 1. IMPORTA AQUÍ TU SISTEMA DE AUTENTICACIÓN
@@ -59,7 +60,42 @@ export async function liquidateDispatchAction(
     }
     const parsed = liquidationManifestSchema.parse(data);
 
-    await dispatchRepository.liquidateDispatch(manifestId, parsed, session.uid);
+    // 1. Cargar el manifiesto para validaciones de negocio
+    const manifest = await dispatchRepository.getManifestById(manifestId);
+    if (!manifest) {
+      return { success: false, error: "Manifiesto no encontrado" };
+    }
+
+    // 2. Seguridad: Doble liquidación
+    if (manifest.status === "LIQUIDATED") {
+      return { success: false, error: "Este despacho ya fue liquidado" };
+    }
+
+    // 3. Validar rango de fecha (interpretar como hora Perú)
+    const liquidationDate = parsePeruDatetimeLocal(parsed.liquidationDate);
+    const now = new Date(); // Instante real UTC
+    
+    // El dispatchDate viene como objeto Date (ya serializado)
+    const dispatchDate = new Date(manifest.dispatchDate);
+
+    if (liquidationDate < dispatchDate) {
+      return { success: false, error: "La fecha de cierre no puede ser anterior a la apertura" };
+    }
+    
+    // Margen de 5 min por si hay desfase de relojes en el cliente
+    const fiveMinutes = 5 * 60 * 1000;
+    if (liquidationDate.getTime() > now.getTime() + fiveMinutes) {
+      return { success: false, error: "La fecha de cierre no puede ser futura" };
+    }
+
+    await dispatchRepository.liquidateDispatch(
+      manifestId, 
+      {
+        ...parsed,
+        liquidationDate // Pasamos el objeto Date
+      }, 
+      session.uid
+    );
 
     revalidatePath("/dispatch");
     revalidatePath("/inventory");
