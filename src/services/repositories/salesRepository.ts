@@ -1042,6 +1042,17 @@ export const salesRepository = {
     const usersSnapshot = await adminDb.collection("users").get();
     const drivers = usersSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
 
+    let manifestData: any = null;
+    if (saleData.manifestId && saleData.manifestId !== "PLANT_SALE") {
+      const manifestDoc = await adminDb
+        .collection(DISPATCH_COLLECTION)
+        .doc(saleData.manifestId)
+        .get();
+      if (manifestDoc.exists) {
+        manifestData = { id: manifestDoc.id, ...manifestDoc.data() };
+      }
+    }
+
     return serializeFirestoreData({
       saleData,
       customerData,
@@ -1049,6 +1060,7 @@ export const salesRepository = {
       greData,
       trucks,
       drivers,
+      manifestData,
     });
   },
 
@@ -1449,6 +1461,7 @@ export const salesRepository = {
     saleId: string,
     cancelledByUid: string,
     reason: string,
+    allowPostLiquidation = false,
   ): Promise<void> {
     await adminDb.runTransaction(async (transaction) => {
       const saleRef = adminDb.collection(SALES_COLLECTION).doc(saleId);
@@ -1475,7 +1488,9 @@ export const salesRepository = {
       }
 
       if (saleData.isBilled === true || saleData.sunatDocumentId) {
-        throw new Error("Venta facturada con SUNAT, anule primero el comprobante.");
+        throw new Error(
+          "Venta facturada con SUNAT, requiere nota de crédito (Fase B). No se puede anular."
+        );
       }
 
       const customerRef = adminDb.collection(CUSTOMERS_COLLECTION).doc(saleData.customerId);
@@ -1488,6 +1503,7 @@ export const salesRepository = {
       const isPlant = saleData.manifestId === "PLANT_SALE";
       let manifestDoc: admin.firestore.DocumentSnapshot | null = null;
       let manifestRef: admin.firestore.DocumentReference | null = null;
+      let isPostLiquidation = false;
 
       if (!isPlant && saleData.manifestId) {
         manifestRef = adminDb.collection(DISPATCH_COLLECTION).doc(saleData.manifestId);
@@ -1497,7 +1513,12 @@ export const salesRepository = {
         }
         const manifestData = manifestDoc.data();
         if (manifestData?.status === "LIQUIDATED") {
-          throw new Error("El manifiesto de ruta ya fue liquidado. No se puede anular esta venta.");
+          if (!allowPostLiquidation) {
+            throw new Error(
+              "El manifiesto de ruta ya fue liquidado. No se puede anular esta venta."
+            );
+          }
+          isPostLiquidation = true;
         }
       }
 
@@ -1514,7 +1535,7 @@ export const salesRepository = {
       const productDocsMap: Record<string, admin.firestore.DocumentData> = {};
       const batchDocsMap: Record<string, { ref: admin.firestore.DocumentReference; currentStock: number }> = {};
 
-      if (isPlant) {
+      if (isPlant || isPostLiquidation) {
         const uniqueProductIds = Array.from(
           new Set([
             ...saleData.items.map((i) => i.productId),
@@ -1602,8 +1623,8 @@ export const salesRepository = {
       }
 
       // 4. ESCRITURAS ESPECÍFICAS
-      if (isPlant) {
-        // VENTA PLANTA
+      if (isPlant || isPostLiquidation) {
+        // VENTA PLANTA o RUTA POST-LIQUIDACIÓN (Stock vuelve a almacén/lotes)
         saleData.items.forEach((item) => {
           const isBottleOnly = item.lotNumber === "" || (item as SaleItemWithSaleType).itemSaleType === "BOTTLE";
           if (isBottleOnly) return;
@@ -1639,7 +1660,7 @@ export const salesRepository = {
             quantity: item.quantity,
             lotNumber: item.lotNumber || "GENERIC",
             referenceId: saleId,
-            referenceType: "SALE_CANCELLATION",
+            referenceType: isPostLiquidation ? "POST_LIQUIDATION_RETURN" : "SALE_CANCELLATION",
             previousStock: previousStockFilled,
             newStock: newStockFilled,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1671,7 +1692,7 @@ export const salesRepository = {
             phase: "EMPTY",
             quantity: empty.quantity,
             referenceId: saleId,
-            referenceType: "SALE_CANCELLATION",
+            referenceType: isPostLiquidation ? "POST_LIQUIDATION_RETURN" : "SALE_CANCELLATION",
             previousStock: previousStockEmpty,
             newStock: newStockEmpty,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1681,8 +1702,27 @@ export const salesRepository = {
             userId: cancelledByUid,
           });
         });
+
+        // Marca de ajuste administrativo en el manifiesto
+        if (isPostLiquidation && manifestRef) {
+          const manifestData = manifestDoc!.data() as DispatchManifest;
+          const postLiquidationCancellations = manifestData.postLiquidationCancellations || [];
+          
+          postLiquidationCancellations.push({
+            saleId,
+            cancelledBy: cancelledByUid,
+            cancelledAt: new Date(),
+            reason,
+          });
+
+          transaction.update(manifestRef, {
+            hasPostLiquidationAdjustments: true,
+            postLiquidationCancellations,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
       } else {
-        // VENTA RUTA
+        // VENTA RUTA (Flujo normal, NO liquidado)
         if (saleData.linkedOrderId) {
           // ROUTE-pedido
           transaction.update(orderRef!, {

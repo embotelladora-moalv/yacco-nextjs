@@ -30,7 +30,7 @@ export interface KardexLog {
   quantity: number;
   lotNumber?: string;
   referenceId: string; // ID del ProductionBatch, ShrinkageLog o Sale
-  referenceType: "PRODUCTION" | "SHRINKAGE" | "SALE" | "RETURN";
+  referenceType: "PRODUCTION" | "SHRINKAGE" | "SALE" | "RETURN" | "POST_LIQUIDATION_RETURN";
   previousStock: number;
   newStock: number;
   createdAt: Date;

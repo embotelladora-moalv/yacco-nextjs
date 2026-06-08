@@ -88,7 +88,8 @@ export interface KardexLog {
     | "EMPTY_RETURN_LIQUIDATION"
     | "EMPTY_RETURN_PITSTOP"
     | "DISPATCH_RELOAD"
-    | "DISPATCH_RELOAD_RETURN";
+    | "DISPATCH_RELOAD_RETURN"
+    | "POST_LIQUIDATION_RETURN";
 
   previousStock: number;
   newStock: number;

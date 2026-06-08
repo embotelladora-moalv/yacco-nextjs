@@ -22,6 +22,7 @@ interface CancelSaleButtonProps {
   isBilled?: boolean;
   sunatDocumentId?: string | null;
   status: string;
+  manifestStatus?: string;
 }
 
 export function CancelSaleButton({
@@ -29,6 +30,7 @@ export function CancelSaleButton({
   isBilled,
   sunatDocumentId,
   status,
+  manifestStatus,
 }: CancelSaleButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -36,11 +38,14 @@ export function CancelSaleButton({
   const router = useRouter();
 
   const isCancelled = status === "CANCELLED";
-  const cannotCancel = isCancelled || isBilled || !!sunatDocumentId;
+  const isLiquidated = manifestStatus === "LIQUIDATED";
+  const cannotCancel = isCancelled || ((isBilled || !!sunatDocumentId) && isLiquidated);
 
   let tooltipMessage = "";
   if (isCancelled) tooltipMessage = "Esta venta ya fue anulada.";
-  else if (isBilled || sunatDocumentId) tooltipMessage = "No se puede anular porque ya fue facturada.";
+  else if ((isBilled || sunatDocumentId) && isLiquidated) {
+    tooltipMessage = "Venta facturada y manifest liquidado. Requiere nota de crédito (Fase B).";
+  }
 
   const handleCancel = () => {
     if (!reason.trim()) {
@@ -49,9 +54,13 @@ export function CancelSaleButton({
     }
 
     startTransition(async () => {
-      const result = await cancelSaleAction(saleId, reason.trim());
+      const result = await cancelSaleAction(saleId, reason.trim(), isLiquidated);
       if (result.success) {
-        toast.success("Venta anulada correctamente.");
+        toast.success(
+          isLiquidated
+            ? "Venta anulada correctamente (Ajuste Post-Liquidación)."
+            : "Venta anulada correctamente."
+        );
         setIsOpen(false);
         router.refresh();
       } else {
@@ -91,7 +100,13 @@ export function CancelSaleButton({
             <XCircle className="h-6 w-6 text-red-600" /> Anular Venta #{saleId.slice(-6).toUpperCase()}
           </DialogTitle>
           <DialogDescription className="text-slate-600 font-medium pt-2">
-            Esta acción revertirá permanentemente la venta, actualizando el inventario, la deuda del cliente y sus saldos de envases.
+            {isLiquidated ? (
+              <span className="text-amber-600 font-bold block bg-amber-50 p-3 rounded-2xl border border-amber-100">
+                ADVERTENCIA: El manifiesto ya fue liquidado. Esta anulación se registrará como un ajuste administrativo y el stock volverá al almacén de planta, no al camión.
+              </span>
+            ) : (
+              "Esta acción revertirá permanentemente la venta, actualizando el inventario, la deuda del cliente y sus saldos de envases."
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -132,7 +147,7 @@ export function CancelSaleButton({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Anulando...
               </>
             ) : (
-              "Confirmar Anulación"
+              isLiquidated ? "Confirmar Ajuste Administrativo" : "Confirmar Anulación"
             )}
           </Button>
         </div>
