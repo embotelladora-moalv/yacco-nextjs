@@ -57,6 +57,15 @@ export interface DispatchManifest {
   notes?: string;
   liquidationNotes?: string; // Notas de cierre (agregado)
 
+  // Ajustes administrativos post-liquidación
+  hasPostLiquidationAdjustments?: boolean;
+  postLiquidationCancellations?: {
+    saleId: string;
+    cancelledBy: string;
+    cancelledAt: Date;
+    reason: string;
+  }[];
+
   createdAt: Date;
   updatedAt: Date;
 }

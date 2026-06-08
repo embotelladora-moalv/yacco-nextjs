@@ -31,7 +31,7 @@ export default async function SaleDetailPage({ params }: PageProps) {
     notFound();
   }
 
-  const { saleData, customerData, sunatData, greData, trucks, drivers } =
+  const { saleData, customerData, sunatData, greData, trucks, drivers, manifestData } =
     detailData;
 
   const formatDate = (isoString: string) => {
@@ -90,6 +90,7 @@ export default async function SaleDetailPage({ params }: PageProps) {
             status={saleData.status}
             isBilled={saleData.isBilled}
             sunatDocumentId={saleData.sunatDocumentId}
+            manifestStatus={manifestData?.status}
           />
         </div>
       </div>
