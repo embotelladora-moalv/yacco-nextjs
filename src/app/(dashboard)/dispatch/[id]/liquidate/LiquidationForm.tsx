@@ -64,20 +64,26 @@ export function LiquidationForm({
     );
   }, [manifest.pitStopsHistory]);
 
-  // 1. SUGERENCIAS AUTOMÁTICAS: Consolidamos lo cargado vs lo vendido en boletas
-  const suggestedItems = useMemo(() => {
-    const loadedItems = manifest.items || [];
-    const salesItems: Record<string, number> = {};
-
+  // 1. MAPA DE VENTAS POR LOTE (Para cálculo estricto de cuadre)
+  const salesItemsMap = useMemo(() => {
+    const map: Record<string, number> = {};
     sales.forEach((sale: any) => {
       (sale.items || []).forEach((item: any) => {
-        if (!salesItems[item.productId]) salesItems[item.productId] = 0;
-        salesItems[item.productId] += item.quantity;
+        const key = `${item.productId}_${item.lotNumber}`;
+        if (!map[key]) map[key] = 0;
+        map[key] += item.quantity;
       });
     });
+    return map;
+  }, [sales]);
+
+  // 2. SUGERENCIAS AUTOMÁTICAS: Consolidamos lo cargado vs lo vendido en boletas
+  const suggestedItems = useMemo(() => {
+    const loadedItems = manifest.items || [];
 
     return loadedItems.map((loaded: any) => {
-      const sold = salesItems[loaded.productId] || 0;
+      const key = `${loaded.productId}_${loaded.lotNumber}`;
+      const sold = salesItemsMap[key] || 0;
       const returnedFull = Math.max(0, loaded.quantityLoaded - sold);
 
       return {
@@ -88,7 +94,7 @@ export function LiquidationForm({
         waste: [], // Inicialmente vacío
       };
     });
-  }, [manifest.items, sales]);
+  }, [manifest.items, salesItemsMap]);
 
   const suggestedEmpties = useMemo(() => {
     const emptiesCount: Record<string, number> = {};
@@ -264,6 +270,7 @@ export function LiquidationForm({
                     form={form}
                     getProductName={getProductName}
                     wasteReasons={wasteReasons}
+                    salesItemsMap={salesItemsMap}
                   />
                 ))}
               </TableBody>
@@ -514,12 +521,14 @@ function ItemRow({
   index, 
   form, 
   getProductName, 
-  wasteReasons 
+  wasteReasons,
+  salesItemsMap
 }: { 
   index: number; 
   form: UseFormReturn<LiquidationManifestFormValues>; 
   getProductName: (id: string) => string;
   wasteReasons: ShrinkageReason[];
+  salesItemsMap: Record<string, number>;
 }) {
   const item = form.watch(`items.${index}`);
   const qtyRet = form.watch(`items.${index}.quantityReturnedFull`) || 0;
@@ -527,51 +536,72 @@ function ItemRow({
   const waste = form.watch(`items.${index}.waste`) || [];
   const totalWaste = waste.reduce((sum, w) => sum + (w.quantity || 0), 0);
   
-  const sold = item.quantityLoaded - qtyRet - totalWaste;
+  const realSold = salesItemsMap[`${item.productId}_${item.lotNumber}`] || 0;
+  const unreconciled = Math.max(0, item.quantityLoaded - realSold - qtyRet - totalWaste);
+  const mathSold = item.quantityLoaded - qtyRet - totalWaste - unreconciled;
 
   return (
-    <TableRow className="hover:bg-slate-50/30 align-top">
-      <TableCell className="pl-8 py-4">
-        <div className="flex flex-col">
-          <span className="font-bold text-slate-800 text-sm">
-            {getProductName(item.productId)}
-          </span>
-          <span className="text-[10px] font-black text-slate-400 bg-slate-100 w-fit px-1.5 rounded uppercase mt-1">
-            Lote: {item.lotNumber}
-          </span>
-        </div>
-      </TableCell>
-      <TableCell className="text-center font-black text-slate-400 py-4">
-        {item.quantityLoaded}
-      </TableCell>
-      <TableCell className="text-center bg-blue-50/20 py-4">
-        <Input
-          type="number"
-          {...form.register(`items.${index}.quantityReturnedFull`, {
-            valueAsNumber: true,
-          })}
-          className="w-20 mx-auto h-9 text-center font-black border-blue-100 focus:ring-blue-100 bg-white"
-        />
-      </TableCell>
-      <TableCell className="text-left bg-red-50/10 py-4">
-        <WasteLinesInput 
-          itemIndex={index} 
-          form={form} 
-          wasteReasons={wasteReasons} 
-        />
-      </TableCell>
-      <TableCell className="pr-8 text-right py-4">
-        <Badge
-          className={`font-black ${
-            sold < 0
-              ? "bg-red-500 text-white"
-              : "bg-slate-100 text-slate-600"
-          }`}
-        >
-          {sold} vendidos
-        </Badge>
-      </TableCell>
-    </TableRow>
+    <>
+      <TableRow className="hover:bg-slate-50/30 align-top">
+        <TableCell className="pl-8 py-4">
+          <div className="flex flex-col">
+            <span className="font-bold text-slate-800 text-sm">
+              {getProductName(item.productId)}
+            </span>
+            <span className="text-[10px] font-black text-slate-400 bg-slate-100 w-fit px-1.5 rounded uppercase mt-1">
+              Lote: {item.lotNumber}
+            </span>
+          </div>
+        </TableCell>
+        <TableCell className="text-center font-black text-slate-400 py-4">
+          {item.quantityLoaded}
+        </TableCell>
+        <TableCell className="text-center bg-blue-50/20 py-4">
+          <Input
+            type="number"
+            {...form.register(`items.${index}.quantityReturnedFull`, {
+              valueAsNumber: true,
+            })}
+            className="w-20 mx-auto h-9 text-center font-black border-blue-100 focus:ring-blue-100 bg-white"
+          />
+        </TableCell>
+        <TableCell className="text-left bg-red-50/10 py-4">
+          <WasteLinesInput 
+            itemIndex={index} 
+            form={form} 
+            wasteReasons={wasteReasons} 
+          />
+        </TableCell>
+        <TableCell className="pr-8 text-right py-4">
+          <div className="flex flex-col items-end gap-1">
+            <Badge
+              className={`font-black ${
+                mathSold < 0
+                  ? "bg-red-500 text-white"
+                  : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {mathSold} vendidos
+            </Badge>
+            <span className="text-[9px] font-bold text-slate-400">
+              Venta Real: {realSold}
+            </span>
+          </div>
+        </TableCell>
+      </TableRow>
+      {unreconciled > 0 && (
+        <TableRow className="bg-orange-50/50">
+          <TableCell colSpan={5} className="py-2 px-8">
+            <div className="flex items-center gap-2 text-orange-600 text-xs font-bold">
+              <AlertTriangle className="h-4 w-4" />
+              <span>
+                Faltan {unreconciled} unidades sin justificar. El sistema las registrará como pérdida si no se clasifican como merma o retorno.
+              </span>
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }
 

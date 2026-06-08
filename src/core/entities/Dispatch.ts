@@ -14,6 +14,7 @@ export interface DispatchItem {
     reasonId: string;
     isRecyclable: boolean;
   }[];
+  unreconciledLoss?: number; // Faltante inexplicable: cargado - vendido - vuelto - merma
 }
 
 // Detalle de los vacíos que el chofer trae de regreso en la tarde
