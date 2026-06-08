@@ -25,13 +25,22 @@ export const liquidationItemSchema = z
     lotNumber: z.string(),
     quantityLoaded: z.number(), // Lo que se llevó (Solo lectura para validación)
     quantityReturnedFull: z.coerce.number().min(0, "No puede ser negativo"),
-    wasteQuantity: z.coerce.number().min(0, "No puede ser negativo").default(0),
+    waste: z
+      .array(
+        z.object({
+          quantity: z.coerce.number().min(0, "Mínimo 0"),
+          reasonId: z.string().min(1, "Seleccione motivo"),
+          isRecyclable: z.boolean(),
+        }),
+      )
+      .default([]),
   })
   .superRefine((data, ctx) => {
-    if (data.quantityReturnedFull + data.wasteQuantity > data.quantityLoaded) {
+    const totalWaste = data.waste.reduce((sum, w) => sum + w.quantity, 0);
+    if (data.quantityReturnedFull + totalWaste > data.quantityLoaded) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "El retorno y la merma superan lo que se llevó.",
+        message: `El retorno (${data.quantityReturnedFull}) y la merma (${totalWaste}) superan lo cargado (${data.quantityLoaded}).`,
         path: ["quantityReturnedFull"],
       });
     }
