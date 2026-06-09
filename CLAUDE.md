@@ -124,39 +124,34 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 
 ### Avances recientes
 
-- **Migración Aditiva de Customers COMPLETO**:
-  - Actualización de los 604 documentos en producción (`yacco-2026`) sin borrar campos legacy.
-  - Campos agregados: `documentNumber` (copia de `documentId`), `documentType` (DNI: 8 dígitos, RUC: 11 dígitos, OTHER: resto), `isMain` en cada ubicación (copia de `isDefault`).
-  - Conversión de `customPrices` de Map `{}` a Array `[]` vacíos (impacto cero verificado en 604 docs).
-  - Verificación final: 5 DNI / 74 RUC / 525 OTHER.
-- **Resolución de Precios (Use-Case resolvePrice) COMPLETO**:
-  - Extracción de la lógica de cálculo de precios a `src/core/use-cases/sales/resolvePrice.ts`.
-  - Compartido entre `SaleForm` y `OrderForm`, eliminando duplicación.
-  - Manejo seguro de `customPrices` (soporta `undefined`/`[]`) resolviendo el fallo de `.find`.
-  - Preserva comportamiento de fallback con `||` (precio 0 personalizado usa precio base).
-- **Scripts de Mantenimiento y Migración**:
-  - Commiteados en `scripts/migration/` y `scripts/cleanup/` (backup, dry-run, migrate, verify).
-  - Actualización de `.gitignore` para excluir `firebase-data/` y `/scripts/cleanup/backup-*/` (datos sensibles).
-- **Testing unitario con Vitest**:
-  - Suite de **48 pruebas unitarias** robustas: `saleReversal` (17), `containerAdjustment` (9), `paymentAllocation` (14), `resolvePrice` (8).
-- **Cobranzas y Pago Dirigido COMPLETO**:
-  - Implementación de **Pago Dirigido**: Seleccionar ventas específicas y asignar montos individuales.
-  - Validación estricta en el servidor mediante transacción.
-- **Trazabilidad de envases (3 fases) COMPLETO**:
-  - Colección `customerContainerLogs`. Ajuste manual de balances por `ADMIN`. Reporte consolidado en `/inventory/report`.
-- **Anulación de Ventas (Fase A) COMPLETO**:
-  - Implementación de `cancelSaleAction` y lógica de reversa por contra-asiento.
-- **Historial Global de Cobranzas COMPLETO**:
-  - Ruta `/collections/history` con paginación por cursores y cálculo eficiente de totales.
+- **Dashboard (3 métricas clave)**:
+  - Ingresos por periodo (6 meses, status COMPLETED, bordes de mes en hora Perú UTC-5, Recharts).
+  - Ventas por producto del mes (cursor 500, cruce con `products`, visualización en tabla).
+  - Top clientes: Deudores (índice `isActive+debtAmount`) y Volumen (volumen del mes por `customerId`).
+- **Rediseño COMPLETO de mermas/liquidación (Fases 0-3c)**:
+  - **Fase 0**: `shrinkageReasons` migrado a objetos estructurados + UI settings + normalización legacy.
+  - **Fase 1**: Merma con motivo en ruta (`waste[]` por lote), reciclable→stockEmpty / no-reciclable→baja. Kardex `SHRINKAGE`.
+  - **Fase 2**: Cuadre visible contra ventas reales (`productId+lotNumber`), faltante trazado `UNRECONCILED_LOSS` (delta:0).
+  - **Fase 3a**: Merma de planta (`registerShrinkage`), kardex DELTA REAL (planta SÍ descuenta), validación lote-primero.
+  - **Fase 3b**: Corrección de carga resuelta mediante el uso del flujo de *pit-stop*.
+  - **Fase 3c**: Anulación post-liquidación para ventas NO facturadas (ADMIN, stock a planta, kardex `POST_LIQUIDATION_RETURN`). Gate de roles: post-liquidación solo ADMIN.
+- **Fecha+hora de cierre en liquidación**: Selector `datetime-local` con rango validado y helper `formatPeruDateTime` (America/Lima).
+- **Mejoras técnicas y tipado**:
+  - `CustomPrice` unificado en `CRM.ts`, `resolvePrice` tipado sin `as any`.
+  - `tsconfig`: `scripts/` excluido del build de producción.
+  - `.gitignore`: `scripts/verify/` ignorado.
+- **Migración Aditiva de Customers COMPLETO**: Actualización de 604 documentos en producción (`yacco-2026`).
+- **Resolución de Precios (Use-Case resolvePrice) COMPLETO**: Lógica extraída y compartida entre `SaleForm` y `OrderForm`.
+- **Testing unitario con Vitest**: Suite de **48 pruebas unitarias** robustas.
 
 ### Pendientes siguientes
 
-- 🚨 **DESPLEGAR ÍNDICES FIRESTORE (BLOQUEANTE)**: Ejecutar `firebase deploy --only firestore:indexes` para filtros y ordenación complejos.
-- 🚨 **Fase B de Anulaciones (Nota de Crédito/Baja)**: Anulación de ventas facturadas ante SUNAT.
-- **Verificación de Ventas y Productos**: Analizar consistencia de los 8433 documentos de `sales` y la colección `products` contra el código actual (estrategia aditiva si hay desajustes).
-- Reimport de DNIs (Prompt D) cuando el Excel esté lleno.
-- Rellenar placeholders de la documentación académica (`docs/proyecto/`).
-- Bugs críticos vigentes: BUG-02 (fecha GRE), BUG-03 (worker SUNAT real), BUG-04 (seed).
+- 🚨 **DESPLEGAR ÍNDICES FIRESTORE (BLOQUEANTE)**: Ejecutar `firebase deploy --only firestore:indexes`. El índice `isActive+debtAmount` es necesario para el top deudores en producción.
+- 🚨 **git push origin develop**: Sincronizar commits locales pendientes de subir.
+- 🚨 **Fase B de Anulaciones (Nota de Crédito)**: Anulación de ventas facturadas ante SUNAT (dependencia de Fase 3c).
+- **BUG-03 (crítico)**: Worker `processSunatQueue` real (no simulado).
+- **Tests de integración**: Cobertura para `registerSale`, *pit-stop*, y flujo SUNAT/IGV.
+- **Dashboard**: Selector de rango de fechas (hoy es fijo: mes actual / 6 meses).
 
 ### Críticos pendientes (Sprint 1)
 
@@ -166,9 +161,11 @@ claves están listadas en `docs/README.md`). No commitear `.env.local`.
 
 ### Deuda relevante
 
-- Ocurrencias de `as any` en el proyecto (especialmente en resolvers complejos de Zod/React Hook Form).
-- URL de SUNAT BETA hardcodeada en 3 archivos (debería ser env var).
-- `CustomerLocation` duplicado en `Customer.ts` y `CRM.ts` con shapes distintos.
+- **BUG-02**: Error de fecha en Guías de Remisión (GRE).
+- **BUG-04**: Error en el seed de datos.
+- `CustomerLocation` duplicado en `Customer.ts` y `CRM.ts`.
+- `slugifyReason` mal ubicado en `dateUtils` (debería ir a utils de strings).
+- ~380 advertencias de linter (`any` preexistentes).
 
 ### Lo que está bien (no romper)
 
